@@ -193,7 +193,18 @@ help_text = """<b>📚 Legacy Dumper - User Guide</b>\n
 • Zip all your <b>ORIGINAL</b> <code>.so</code> files and send it.
 • Zip all your <b>DUMPED</b> <code>.so</code> files and send it.
 • The bot will automatically map and scan all of them!\n
-<i>Ready? Go back and send your first file or archive!</i>"""
+<i>Ready? Go back and send your first file or archive!</i>\n
+🛡️ <b>Admin?</b> Check <code>/admincmds</code> for more options."""
+
+admin_cmds_text = """<b>🛡️ Admin Control Panel</b>\n
+• <code>/gen &lt;name&gt; &lt;days&gt;d</code> - Generate a new subscription key.
+• <code>/del &lt;key&gt;</code> - Delete a specific key from the database.
+• <code>/users</code> - View total authorized users (Coming Soon)."""
+
+@bot.message_handler(commands=['admincmds'])
+def admin_cmds(message):
+    if message.from_user.id not in ADMIN_IDS: return
+    bot.reply_to(message, admin_cmds_text, parse_mode="HTML")
 
 @bot.message_handler(commands=['gen'])
 def generate_key(message):
@@ -208,6 +219,19 @@ def generate_key(message):
     conn = sqlite3.connect('dumper.db'); c = conn.cursor()
     c.execute("INSERT INTO keys (key_text, duration_days) VALUES (?, ?)", (key_text, duration_days)); conn.commit(); conn.close()
     bot.reply_to(message, f"✅ <b>Key Generated!</b>\n\n🔑 <code>{key_text}</code>\n⏱️ {duration_days} days\n<code>/redeem {key_text}</code>", parse_mode="HTML")
+
+@bot.message_handler(commands=['del'])
+def delete_key(message):
+    if message.from_user.id not in ADMIN_IDS: return
+    args = message.text.split()
+    if len(args) != 2:
+        return bot.reply_to(message, "⚠️ Usage: <code>/del &lt;KEY&gt;</code>", parse_mode="HTML")
+    key_text = args[1]
+    conn = sqlite3.connect('dumper.db'); c = conn.cursor()
+    c.execute("DELETE FROM keys WHERE key_text=?", (key_text,))
+    if c.rowcount > 0: bot.reply_to(message, f"✅ <b>Key Deleted:</b> <code>{key_text}</code>", parse_mode="HTML")
+    else: bot.reply_to(message, "❌ <b>Key not found!</b>", parse_mode="HTML")
+    conn.commit(); conn.close()
 
 @bot.message_handler(commands=['redeem'])
 def redeem_key(message):
@@ -310,11 +334,24 @@ def get_all_files(directory):
 
 def format_offsets_for_telegram(lib_name, offsets):
     if not offsets: return ""
-    display_offsets = offsets[:25] 
-    text = f"🎯 <b>Offsets for {lib_name}</b> (Tap to copy):\n\n"
-    for offset in display_offsets: text += f"<code>{offset}</code>\n"
-    if len(offsets) > 25: text += f"\n<i>...and {len(offsets) - 25} more in .cpp log.</i>\n"
-    return text
+    # We remove the limit and send all offsets as requested
+    header = f"🚀 <b>ALL OFFSETS DETECTED</b>\n📦 Library: <code>Dump_{lib_name}.cpp</code>\n\n"
+    content = ""
+    for offset in offsets:
+        content += f"{offset}\n"
+    
+    # We use <pre> for "Copy Code" effect in some clients, but <code> works for tap-to-copy
+    # To satisfy "Quote format" we can wrap in blockquote if needed
+    full_msg = header + "<blockquote><pre>" + content + "</pre></blockquote>"
+    return full_msg
+
+def send_long_message(chat_id, text):
+    """Splits and sends long messages to avoid Telegram's limit."""
+    if len(text) <= 4096:
+        bot.send_message(chat_id, text, parse_mode="HTML")
+    else:
+        for i in range(0, len(text), 4096):
+            bot.send_message(chat_id, text[i:i+4096], parse_mode="HTML")
 
 def process_zip_files(chat_id, status_message):
     state = user_states.get(chat_id)
@@ -338,14 +375,12 @@ def process_zip_files(chat_id, status_message):
             hooks, extracted_offsets = scan_single_dump_pro(orig_so, matching_dump, start_addr, end_addr, log_file, lib_name)
             is_patched = patch_binary_pro(matching_dump, patched_file)
             results.append((filename, hooks, is_patched))
-            if extracted_offsets: all_extracted_text += format_offsets_for_telegram(lib_name, extracted_offsets) + "\n"
+            if extracted_offsets: all_extracted_text += format_offsets_for_telegram(lib_name, extracted_offsets) + "\n\n"
     if not results: bot.edit_message_text("⚠️ No matching .so files found.", chat_id=chat_id, message_id=status_message.message_id)
     else:
         summary = "✅ Done:\n" + "\n".join([f"📦 {f}: {h} hooks | Patched: {'Yes' if p else 'No'}" for f, h, p in results])
         bot.edit_message_text(f"⚙️ Zipping results...\n{summary}", chat_id=chat_id, message_id=status_message.message_id)
-        if all_extracted_text:
-            if len(all_extracted_text) > 4000: all_extracted_text = all_extracted_text[:4000] + "\n... (truncated)"
-            bot.send_message(chat_id, all_extracted_text, parse_mode="HTML")
+        if all_extracted_text: send_long_message(chat_id, all_extracted_text)
         out_zip = f"tmp_files/Results_{chat_id}.zip"
         with zipfile.ZipFile(out_zip, 'w') as zf:
             for root, _, files in os.walk(out_dir):
@@ -371,7 +406,7 @@ def process_files(chat_id, status_message):
     bot.edit_message_text(f"🔍 Scanning {lib_name}...", chat_id=chat_id, message_id=status_message.message_id)
     hooks_found, extracted_offsets = scan_single_dump_pro(orig_path, dump_path, start_addr, end_addr, log_file, lib_name)
     is_patched = patch_binary_pro(dump_path, patched_file)
-    if extracted_offsets: bot.send_message(chat_id, format_offsets_for_telegram(lib_name, extracted_offsets), parse_mode="HTML")
+    if extracted_offsets: send_long_message(chat_id, format_offsets_for_telegram(lib_name, extracted_offsets))
     if os.path.exists(log_file):
         with open(log_file, 'rb') as f: bot.send_document(chat_id, f, caption=f"📝 {lib_name} Log ({hooks_found} hooks)")
     if is_patched and os.path.exists(patched_file):
