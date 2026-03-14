@@ -170,14 +170,16 @@ def main_menu_keyboard():
     return markup
 
 def back_keyboard():
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu"))
-    return markup
+    # Updating to match main_menu_keyboard exactly as requested
+    return main_menu_keyboard()
 
 def get_welcome_text(user_id):
     sub_status = "✅ <b>Active</b>" if is_authorized(user_id) else "❌ <b>Inactive</b> (Use /redeem)"
     return f"""<b>🚀 Welcome to Legacy Dumper!</b>
-<i>@legacydumperbot - The ultimate tool for cracking libs.</i>\n\n<b>🔑 Subscription Status:</b> {sub_status}\n
+<i>@legacydumperbot - The ultimate tool for cracking libs.</i>\n
+<b>OWNER: @LegacyDevX</b>
+<b>DEVELOPER: @legacyxanku</b>\n
+<b>🔑 Subscription Status:</b> {sub_status}\n
 <b>✨ Features:</b>
 • Smart Hook Scanning
 • Auto Root-Check Bypassing
@@ -186,6 +188,8 @@ def get_welcome_text(user_id):
 👇 <b>Please select an option below to get started:</b>"""
 
 help_text = """<b>📚 Legacy Dumper - User Guide</b>\n
+<b>OWNER: @LegacyDevX</b>
+<b>DEVELOPER: @legacyxanku</b>\n
 <b>1️⃣ Single Library (.so)</b>
 • Upload your <b>ORIGINAL</b> <code>.so</code> file directly here or send a direct link.
 • Then, upload the <b>DUMPED</b> <code>.so</code> file or send a link.\n
@@ -197,6 +201,8 @@ help_text = """<b>📚 Legacy Dumper - User Guide</b>\n
 🛡️ <b>Admin?</b> Check <code>/admincmds</code> for more options."""
 
 admin_cmds_text = """<b>🛡️ Admin Control Panel</b>\n
+<b>OWNER: @LegacyDevX</b>
+<b>DEVELOPER: @legacyxanku</b>\n
 • <code>/gen &lt;name&gt; &lt;days&gt;d</code> - Generate a new subscription key.
 • <code>/del &lt;key&gt;</code> - Delete a specific key from the database.
 • <code>/users</code> - View total authorized users (Coming Soon)."""
@@ -204,7 +210,7 @@ admin_cmds_text = """<b>🛡️ Admin Control Panel</b>\n
 @bot.message_handler(commands=['admincmds'])
 def admin_cmds(message):
     if message.from_user.id not in ADMIN_IDS: return
-    bot.reply_to(message, admin_cmds_text, parse_mode="HTML")
+    bot.reply_to(message, admin_cmds_text, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(commands=['gen'])
 def generate_key(message):
@@ -263,8 +269,8 @@ def send_welcome(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     if call.data == "help_menu":
-        if call.message.content_type == 'photo': bot.edit_message_caption(caption=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
-        else: bot.edit_message_text(text=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
+        if call.message.content_type == 'photo': bot.edit_message_caption(caption=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
+        else: bot.edit_message_text(text=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
     elif call.data == "main_menu":
         welcome = get_welcome_text(call.from_user.id)
         if call.message.content_type == 'photo': bot.edit_message_caption(caption=welcome, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
@@ -334,19 +340,14 @@ def get_all_files(directory):
 
 def format_offsets_for_telegram(lib_name, offsets):
     if not offsets: return ""
-    # We remove the limit and send all offsets as requested
     header = f"🚀 <b>ALL OFFSETS DETECTED</b>\n📦 Library: <code>Dump_{lib_name}.cpp</code>\n\n"
     content = ""
     for offset in offsets:
         content += f"{offset}\n"
-    
-    # We use <pre> for "Copy Code" effect in some clients, but <code> works for tap-to-copy
-    # To satisfy "Quote format" we can wrap in blockquote if needed
     full_msg = header + "<blockquote><pre>" + content + "</pre></blockquote>"
     return full_msg
 
 def send_long_message(chat_id, text):
-    """Splits and sends long messages to avoid Telegram's limit."""
     if len(text) <= 4096:
         bot.send_message(chat_id, text, parse_mode="HTML")
     else:
