@@ -81,19 +81,20 @@ def is_important_pattern(data, offset):
     return None, None
 
 def scan_single_dump_pro(original_path, dump_path, start_offset, end_offset, log_file, lib_name):
-    if not os.path.exists(original_path) or not os.path.exists(dump_path): return 0
+    if not os.path.exists(original_path) or not os.path.exists(dump_path): return 0, []
     try:
         with open(original_path, "rb") as f1: original_data = f1.read()
         with open(dump_path, "rb") as f2: dump_data = f2.read()
-    except Exception: return 0
+    except Exception: return 0, []
 
     file_size = min(len(original_data), len(dump_data), end_offset)
     try:
         with open(log_file, "w", encoding='utf-8') as log:
             log.write(f"=== LEGACY DUMPER PVT TOOL ===\nLibrary: {lib_name}\nScan Time: {datetime.now()}\nOriginal: {os.path.basename(original_path)}\nDump: {os.path.basename(dump_path)}\n" + "=" * 50 + "\n\n")
-    except Exception: return 0
+    except Exception: return 0, []
 
     hooks_found = 0
+    extracted_offsets = []
     i = start_offset
     with open(log_file, "a", encoding='utf-8') as log:
         while i < file_size:
@@ -102,17 +103,19 @@ def scan_single_dump_pro(original_path, dump_path, start_offset, end_offset, log
                 if pattern_name:
                     if pattern_name == "HOOK_SIGNATURE":
                         log.write(f"0x{i:06X} HOOK OFFSET\n")
+                        extracted_offsets.append(f"0x{i:06X} // HOOK_SIGNATURE")
                         hooks_found += 1
                         i += 16
                     else:
                         hex_str = ' '.join(f"{dump_data[i + j]:02X}" for j in range(len(pattern_bytes)))
                         log.write(f"0x{i:06X} {hex_str} // {pattern_name}\n")
+                        extracted_offsets.append(f"0x{i:06X} // {pattern_name}")
                         hooks_found += 1
                         i += len(pattern_bytes)
                 else: i += 1
             else: i += 1
         log.write(f"\n" + "=" * 50 + f"\nTOTAL IMPORTANT HOOKS: {hooks_found}\nLIBRARY: {lib_name}\nSCAN COMPLETED: {datetime.now()}\n")
-    return hooks_found
+    return hooks_found, extracted_offsets
 
 def patch_binary_pro(dump_path, output_path):
     if not os.path.exists(dump_path): return False
@@ -126,6 +129,7 @@ def patch_binary_pro(dump_path, output_path):
             patched = True
             idx += len(PATCH_ROOT_CHECK["pattern"])
         if patched:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
             with open(output_path, "wb") as f: f.write(data)
             return True
         return False
@@ -177,8 +181,8 @@ def get_welcome_text(user_id):
 <b>✨ Features:</b>
 • Smart Hook Scanning
 • Auto Root-Check Bypassing
-• Multi-file Support via ZIP (Upload original & dumped zip!)
-• Large File Support (>50MB via Cloud link)\n
+• Multi-file Support via ZIP
+• Tap-to-Copy Offsets in Chat\n
 👇 <b>Please select an option below to get started:</b>"""
 
 help_text = """<b>📚 Legacy Dumper - User Guide</b>\n
@@ -254,7 +258,7 @@ def process_state_file(message, file_name, file_path_or_download_func, is_url=Fa
     
     if state['step'] == 'waiting_for_original':
         file_path = f"tmp_files/orig_{chat_id}_{file_name}"
-        success = file_path_or_download_func(file_path) if is_url else file_path_or_download_func(file_path)
+        success = file_path_or_download_func(file_path)
         if success:
             state['original_path'] = file_path
             state['is_zip'] = is_zip
@@ -264,10 +268,10 @@ def process_state_file(message, file_name, file_path_or_download_func, is_url=Fa
             
     elif state['step'] == 'waiting_for_dump':
         if is_zip != state.get('is_zip', False):
-            return bot.edit_message_text("⚠️ Format mismatch! Send a ZIP if you sent a ZIP originally, or a .so if you sent a .so originally.", chat_id=chat_id, message_id=msg.message_id)
+            return bot.edit_message_text("⚠️ Format mismatch! Send a ZIP if you sent a ZIP originally.", chat_id=chat_id, message_id=msg.message_id)
             
         file_path = f"tmp_files/dump_{chat_id}_{file_name}"
-        success = file_path_or_download_func(file_path) if is_url else file_path_or_download_func(file_path)
+        success = file_path_or_download_func(file_path)
         if success:
             state['dump_path'] = file_path
             state['step'] = 'processing'
@@ -304,6 +308,14 @@ def get_all_files(directory):
                 files.append(os.path.join(root, filename))
     return files
 
+def format_offsets_for_telegram(lib_name, offsets):
+    if not offsets: return ""
+    display_offsets = offsets[:25] 
+    text = f"🎯 <b>Offsets for {lib_name}</b> (Tap to copy):\n\n"
+    for offset in display_offsets: text += f"<code>{offset}</code>\n"
+    if len(offsets) > 25: text += f"\n<i>...and {len(offsets) - 25} more in .cpp log.</i>\n"
+    return text
+
 def process_zip_files(chat_id, status_message):
     state = user_states.get(chat_id)
     if not state: return
@@ -311,53 +323,39 @@ def process_zip_files(chat_id, status_message):
     orig_dir = f"tmp_files/orig_dir_{chat_id}"
     dump_dir = f"tmp_files/dump_dir_{chat_id}"
     out_dir = f"tmp_files/out_dir_{chat_id}"
-    
     os.makedirs(orig_dir, exist_ok=True); os.makedirs(dump_dir, exist_ok=True); os.makedirs(out_dir, exist_ok=True)
     extract_archive(orig_zip, orig_dir); extract_archive(dump_zip, dump_dir)
-    
-    orig_files = get_all_files(orig_dir)
-    dump_files = get_all_files(dump_dir)
-    
+    orig_files, dump_files = get_all_files(orig_dir), get_all_files(dump_dir)
     bot.edit_message_text("🔍 Extracting and matching libraries...", chat_id=chat_id, message_id=status_message.message_id)
-    
-    results = []
+    results = []; all_extracted_text = ""
     for orig_so in orig_files:
         filename = os.path.basename(orig_so)
-        # Find matching dump file
         matching_dump = next((d for d in dump_files if os.path.basename(d) == filename), None)
         if matching_dump:
             lib_name = filename.replace('.so', '')
             start_addr, end_addr = get_auto_range(orig_so)
-            log_file = os.path.join(out_dir, f"Dump_{lib_name}.cpp")
-            patched_file = os.path.join(out_dir, f"PRO_{lib_name}.so")
-            
-            hooks = scan_single_dump_pro(orig_so, matching_dump, start_addr, end_addr, log_file, lib_name)
+            log_file, patched_file = os.path.join(out_dir, f"Dump_{lib_name}.cpp"), os.path.join(out_dir, f"PRO_{lib_name}.so")
+            hooks, extracted_offsets = scan_single_dump_pro(orig_so, matching_dump, start_addr, end_addr, log_file, lib_name)
             is_patched = patch_binary_pro(matching_dump, patched_file)
             results.append((filename, hooks, is_patched))
-    
-    if not results:
-        bot.edit_message_text("⚠️ No matching .so files found in the archives.", chat_id=chat_id, message_id=status_message.message_id)
+            if extracted_offsets: all_extracted_text += format_offsets_for_telegram(lib_name, extracted_offsets) + "\n"
+    if not results: bot.edit_message_text("⚠️ No matching .so files found.", chat_id=chat_id, message_id=status_message.message_id)
     else:
-        summary = "✅ Processing complete:\n\n"
-        for fname, hooks, patched in results:
-            summary += f"📦 {fname}: {hooks} hooks | Patched: {'Yes' if patched else 'No'}\n"
-            
+        summary = "✅ Done:\n" + "\n".join([f"📦 {f}: {h} hooks | Patched: {'Yes' if p else 'No'}" for f, h, p in results])
         bot.edit_message_text(f"⚙️ Zipping results...\n{summary}", chat_id=chat_id, message_id=status_message.message_id)
+        if all_extracted_text:
+            if len(all_extracted_text) > 4000: all_extracted_text = all_extracted_text[:4000] + "\n... (truncated)"
+            bot.send_message(chat_id, all_extracted_text, parse_mode="HTML")
         out_zip = f"tmp_files/Results_{chat_id}.zip"
         with zipfile.ZipFile(out_zip, 'w') as zf:
             for root, _, files in os.walk(out_dir):
                 for file in files: zf.write(os.path.join(root, file), file)
-        
         if os.path.getsize(out_zip) > 49 * 1024 * 1024:
-            bot.edit_message_text("☁️ Result ZIP too large. Uploading to cloud...", chat_id=chat_id, message_id=status_message.message_id)
             link = upload_to_gofile(out_zip)
             if link: bot.send_message(chat_id, f"🛡️ <b>Results ZIP</b>\n👉 {link}", parse_mode="HTML")
-            else: bot.send_message(chat_id, "❌ Cloud upload failed.")
         else:
             with open(out_zip, 'rb') as f: bot.send_document(chat_id, f, caption=summary)
         bot.delete_message(chat_id, status_message.message_id)
-        
-    # Cleanup
     shutil.rmtree(orig_dir, ignore_errors=True); shutil.rmtree(dump_dir, ignore_errors=True); shutil.rmtree(out_dir, ignore_errors=True)
     for p in [orig_zip, dump_zip, out_zip] if 'out_zip' in locals() else [orig_zip, dump_zip]:
         if os.path.exists(p): os.remove(p)
@@ -369,29 +367,24 @@ def process_files(chat_id, status_message):
     orig_path, dump_path = state['original_path'], state['dump_path']
     lib_name = os.path.basename(orig_path).replace('.so', '').replace('orig_', '').split('_', 1)[-1]
     start_addr, end_addr = get_auto_range(orig_path)
-    
     log_file, patched_file = f"tmp_files/Dump_{lib_name}_{chat_id}.cpp", f"tmp_files/PRO_{lib_name}_{chat_id}.so"
     bot.edit_message_text(f"🔍 Scanning {lib_name}...", chat_id=chat_id, message_id=status_message.message_id)
-    
-    hooks_found = scan_single_dump_pro(orig_path, dump_path, start_addr, end_addr, log_file, lib_name)
+    hooks_found, extracted_offsets = scan_single_dump_pro(orig_path, dump_path, start_addr, end_addr, log_file, lib_name)
     is_patched = patch_binary_pro(dump_path, patched_file)
-    
+    if extracted_offsets: bot.send_message(chat_id, format_offsets_for_telegram(lib_name, extracted_offsets), parse_mode="HTML")
     if os.path.exists(log_file):
-        with open(log_file, 'rb') as f: bot.send_document(chat_id, f, caption=f"📝 {lib_name} Offset Log ({hooks_found} hooks)")
+        with open(log_file, 'rb') as f: bot.send_document(chat_id, f, caption=f"📝 {lib_name} Log ({hooks_found} hooks)")
     if is_patched and os.path.exists(patched_file):
         if os.path.getsize(patched_file) > 49 * 1024 * 1024:
-            bot.edit_message_text("☁️ File too large. Uploading to cloud...", chat_id=chat_id, message_id=status_message.message_id)
             link = upload_to_gofile(patched_file)
-            if link: bot.send_message(chat_id, f"🛡️ <b>Patched Dump</b>\n👉 {link}", parse_mode="HTML")
+            if link: bot.send_message(chat_id, f"🛡️ <b>Patched</b>\n👉 {link}", parse_mode="HTML")
         else:
-            with open(patched_file, 'rb') as f: bot.send_document(chat_id, f, caption="🛡️ Patched Dump (Root Check Bypassed)")
+            with open(patched_file, 'rb') as f: bot.send_document(chat_id, f, caption="🛡️ Patched (Root Bypassed)")
         bot.delete_message(chat_id, status_message.message_id)
-    else: bot.send_message(chat_id, "⚠️ No root check patterns found to patch.")
-        
+    else: bot.send_message(chat_id, "⚠️ No root check patterns found.")
     for p in [orig_path, dump_path, log_file, patched_file]:
         if os.path.exists(p): os.remove(p)
     user_states[chat_id] = {'step': 'waiting_for_original'}
-    bot.send_message(chat_id, "🔄 Send another file or ZIP to start over.", parse_mode="HTML")
 
 if __name__ == '__main__':
     print("🤖 Legacy Dumper Bot is starting up...")
