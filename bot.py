@@ -165,7 +165,7 @@ def extract_archive(archive_path, extract_to):
 # UI and Key commands
 def main_menu_keyboard():
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/legacyxAnku"), InlineKeyboardButton("👥 Community", url=COMMUNITY_LINK))
+    markup.add(InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/LegacyDevX"), InlineKeyboardButton("👥 Community", url=COMMUNITY_LINK))
     markup.add(InlineKeyboardButton("📖 Help & Guide", callback_data="help_menu"))
     return markup
 
