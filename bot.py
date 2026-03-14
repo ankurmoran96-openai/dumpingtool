@@ -7,6 +7,9 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import requests
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
+import zipfile
+import shutil
+import re
 
 # --- CONFIGURATION ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8611766126:AAE3QdKQHauKc99qs2D8wmE0GwZpGNyU7hk')
@@ -16,10 +19,8 @@ ADMIN_IDS = [5707956654, 6049120581]
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Dictionary to keep track of user states
 user_states = {}
 
-# --- DATABASE SETUP ---
 def init_db():
     conn = sqlite3.connect('dumper.db')
     c = conn.cursor()
@@ -30,33 +31,22 @@ def init_db():
 
 init_db()
 
-# --- AUTH & SUBSCRIPTION LOGIC ---
 def is_authorized(user_id):
-    if user_id in ADMIN_IDS:
-        return True
-    
+    if user_id in ADMIN_IDS: return True
     conn = sqlite3.connect('dumper.db')
     c = conn.cursor()
     c.execute("SELECT expiry_date FROM users WHERE user_id=?", (user_id,))
     result = c.fetchone()
     conn.close()
-    
-    if result:
-        expiry = datetime.fromisoformat(result[0])
-        if datetime.now() < expiry:
-            return True
+    if result and datetime.now() < datetime.fromisoformat(result[0]): return True
     return False
 
 def check_membership(user_id):
-    if COMMUNITY_ID == 'YOUR_CHANNEL_ID_HERE':
-        return True
+    if COMMUNITY_ID == 'YOUR_CHANNEL_ID_HERE': return True
     try:
         member = bot.get_chat_member(COMMUNITY_ID, user_id)
-        if member.status in ['member', 'administrator', 'creator']:
-            return True
-        return False
-    except Exception as e:
-        return False
+        return member.status in ['member', 'administrator', 'creator']
+    except Exception: return False
 
 def ensure_access(message):
     user_id = message.from_user.id
@@ -68,7 +58,6 @@ def ensure_access(message):
         return False
     return True
 
-# --- PRO VERSION SMART PATTERNS ---
 IMPORTANT_PATTERNS = {
     "HOOK_SIGNATURE": bytes.fromhex("51 00 00 58 20 02 1F D6"),
     "FULL_PATTERN": bytes.fromhex("00 00 80 D2 C0 03 5F D6"),
@@ -82,17 +71,13 @@ PATCH_ROOT_CHECK = {
 }
 
 def get_auto_range(file_path):
-    if os.path.exists(file_path):
-        file_size = os.path.getsize(file_path)
-        safe_end = int(file_size * 0.995)
-        return 0x0, safe_end
+    if os.path.exists(file_path): return 0x0, int(os.path.getsize(file_path) * 0.995)
     return 0x0, 0x0
 
 def is_important_pattern(data, offset):
     for pattern_name, pattern_bytes in IMPORTANT_PATTERNS.items():
-        if offset + len(pattern_bytes) <= len(data):
-            if data[offset:offset + len(pattern_bytes)] == pattern_bytes:
-                return pattern_name, pattern_bytes
+        if offset + len(pattern_bytes) <= len(data) and data[offset:offset + len(pattern_bytes)] == pattern_bytes:
+            return pattern_name, pattern_bytes
     return None, None
 
 def scan_single_dump_pro(original_path, dump_path, start_offset, end_offset, log_file, lib_name):
@@ -100,8 +85,7 @@ def scan_single_dump_pro(original_path, dump_path, start_offset, end_offset, log
     try:
         with open(original_path, "rb") as f1: original_data = f1.read()
         with open(dump_path, "rb") as f2: dump_data = f2.read()
-    except Exception as e:
-        return 0
+    except Exception: return 0
 
     file_size = min(len(original_data), len(dump_data), end_offset)
     try:
@@ -117,10 +101,9 @@ def scan_single_dump_pro(original_path, dump_path, start_offset, end_offset, log
                 pattern_name, pattern_bytes = is_important_pattern(dump_data, i)
                 if pattern_name:
                     if pattern_name == "HOOK_SIGNATURE":
-                        end = i + 16
                         log.write(f"0x{i:06X} HOOK OFFSET\n")
                         hooks_found += 1
-                        i = end
+                        i += 16
                     else:
                         hex_str = ' '.join(f"{dump_data[i + j]:02X}" for j in range(len(pattern_bytes)))
                         log.write(f"0x{i:06X} {hex_str} // {pattern_name}\n")
@@ -128,7 +111,6 @@ def scan_single_dump_pro(original_path, dump_path, start_offset, end_offset, log
                         i += len(pattern_bytes)
                 else: i += 1
             else: i += 1
-                
         log.write(f"\n" + "=" * 50 + f"\nTOTAL IMPORTANT HOOKS: {hooks_found}\nLIBRARY: {lib_name}\nSCAN COMPLETED: {datetime.now()}\n")
     return hooks_found
 
@@ -154,8 +136,7 @@ def upload_to_gofile(file_path):
         server_res = requests.get("https://api.gofile.io/servers").json()
         if server_res['status'] != 'ok': return None
         server = server_res['data']['servers'][0]['name']
-        url = f"https://{server}.gofile.io/contents/uploadfile"
-        with open(file_path, 'rb') as f: upload_res = requests.post(url, files={'file': f}).json()
+        with open(file_path, 'rb') as f: upload_res = requests.post(f"https://{server}.gofile.io/contents/uploadfile", files={'file': f}).json()
         if upload_res['status'] == 'ok': return upload_res['data']['downloadPage']
         return None
     except Exception: return None
@@ -169,277 +150,248 @@ def download_from_url(url, file_path):
         return True
     except Exception: return False
 
+def extract_archive(archive_path, extract_to):
+    try:
+        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_to)
+        return True
+    except Exception:
+        return False
 
-# --- TELEGRAM BOT LOGIC & UI ---
-
+# UI and Key commands
 def main_menu_keyboard():
     markup = InlineKeyboardMarkup()
-    btn1 = InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/legacyxAnku")
-    btn2 = InlineKeyboardButton("👥 Community", url=COMMUNITY_LINK)
-    btn3 = InlineKeyboardButton("📖 Help & Guide", callback_data="help_menu")
-    markup.add(btn1, btn2)
-    markup.add(btn3)
+    markup.add(InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/legacyxAnku"), InlineKeyboardButton("👥 Community", url=COMMUNITY_LINK))
+    markup.add(InlineKeyboardButton("📖 Help & Guide", callback_data="help_menu"))
     return markup
 
 def back_keyboard():
     markup = InlineKeyboardMarkup()
-    btn = InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu")
-    markup.add(btn)
+    markup.add(InlineKeyboardButton("🔙 Back to Main Menu", callback_data="main_menu"))
     return markup
 
 def get_welcome_text(user_id):
     sub_status = "✅ <b>Active</b>" if is_authorized(user_id) else "❌ <b>Inactive</b> (Use /redeem)"
     return f"""<b>🚀 Welcome to Legacy Dumper!</b>
-<i>@legacydumperbot - The ultimate tool for cracking libs.</i>
-
-<b>🔑 Subscription Status:</b> {sub_status}
-
-<b>⚠️ Important Notice for Large Files:</b>
-If your library file (like <code>libUE4.so</code>) is larger than <b>20MB</b>, please send a <b>Direct Download Link</b> instead of uploading directly.
-
+<i>@legacydumperbot - The ultimate tool for cracking libs.</i>\n\n<b>🔑 Subscription Status:</b> {sub_status}\n
 <b>✨ Features:</b>
 • Smart Hook Scanning
 • Auto Root-Check Bypassing
-• Large File Support (>50MB via Cloud)
-
+• Multi-file Support via ZIP (Upload original & dumped zip!)
+• Large File Support (>50MB via Cloud link)\n
 👇 <b>Please select an option below to get started:</b>"""
 
-help_text = """<b>📚 Legacy Dumper - User Guide</b>
-
-<i>Master the ultimate lib cracking tool in just a few steps!</i>
-
-<b>1️⃣ Small Files (< 20MB)</b>
-• Simply upload your <b>ORIGINAL</b> <code>.so</code> file directly here.
-• Then, upload the <b>DUMPED</b> <code>.so</code> file.
-
-<b>2️⃣ Large Files (> 20MB e.g., UE4)</b>
-• Upload your files to a fast cloud storage (like Mediafire, Discord, etc).
-• Send the <b>Direct Download Link</b> (must end in .so or trigger download).
-• Send the original link first, then the dump link.
-
-<b>⚙️ What happens next?</b>
-The bot will automatically scan for hooks, generate a <code>.cpp</code> offsets log, and patch any root/emulator checks. If the patched file is too big, it will be uploaded to a secure cloud drive for you!
-
-<i>Ready? Go back and send your first file!</i>"""
-
-# --- KEY SYSTEM COMMANDS ---
+help_text = """<b>📚 Legacy Dumper - User Guide</b>\n
+<b>1️⃣ Single Library (.so)</b>
+• Upload your <b>ORIGINAL</b> <code>.so</code> file directly here or send a direct link.
+• Then, upload the <b>DUMPED</b> <code>.so</code> file or send a link.\n
+<b>2️⃣ Multiple Libraries (ZIP Archive) 🌟 NEW</b>
+• Zip all your <b>ORIGINAL</b> <code>.so</code> files and send it.
+• Zip all your <b>DUMPED</b> <code>.so</code> files and send it.
+• The bot will automatically map and scan all of them!\n
+<i>Ready? Go back and send your first file or archive!</i>"""
 
 @bot.message_handler(commands=['gen'])
 def generate_key(message):
-    if message.from_user.id not in ADMIN_IDS:
-        return
-        
+    if message.from_user.id not in ADMIN_IDS: return
     args = message.text.split()
-    if len(args) != 3:
-        bot.reply_to(message, "⚠️ Usage: <code>/gen &lt;key_name&gt; &lt;duration_in_days&gt;d</code>\nExample: <code>/gen VIP 30d</code>", parse_mode="HTML")
+    if len(args) != 3 or not args[2].lower().endswith('d'):
+        bot.reply_to(message, "⚠️ Usage: <code>/gen &lt;name&gt; &lt;days&gt;d</code>", parse_mode="HTML")
         return
-        
-    key_name = args[1]
-    duration_str = args[2].lower()
-    
-    if not duration_str.endswith('d'):
-        bot.reply_to(message, "⚠️ Duration must end with 'd' (e.g., 30d).")
-        return
-        
-    try:
-        duration_days = int(duration_str[:-1])
-    except ValueError:
-        bot.reply_to(message, "⚠️ Invalid duration format.")
-        return
-        
-    random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-    key_text = f"LGC-{key_name}-{random_str}"
-    
-    conn = sqlite3.connect('dumper.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO keys (key_text, duration_days) VALUES (?, ?)", (key_text, duration_days))
-    conn.commit()
-    conn.close()
-    
-    bot.reply_to(message, f"✅ <b>Key Generated Successfully!</b>\n\n🔑 <code>{key_text}</code>\n⏱️ Duration: {duration_days} days\n\nUsers can redeem this using:\n<code>/redeem {key_text}</code>", parse_mode="HTML")
+    try: duration_days = int(args[2][:-1])
+    except ValueError: return bot.reply_to(message, "⚠️ Invalid duration.")
+    key_text = f"LGC-{args[1]}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=8))}"
+    conn = sqlite3.connect('dumper.db'); c = conn.cursor()
+    c.execute("INSERT INTO keys (key_text, duration_days) VALUES (?, ?)", (key_text, duration_days)); conn.commit(); conn.close()
+    bot.reply_to(message, f"✅ <b>Key Generated!</b>\n\n🔑 <code>{key_text}</code>\n⏱️ {duration_days} days\n<code>/redeem {key_text}</code>", parse_mode="HTML")
 
 @bot.message_handler(commands=['redeem'])
 def redeem_key(message):
-    if not check_membership(message.from_user.id):
-        bot.reply_to(message, f"<b>⚠️ Access Denied!</b>\n\nPlease join our community to use this bot.\n👉 {COMMUNITY_LINK}", parse_mode="HTML")
-        return
-
+    if not check_membership(message.from_user.id): return bot.reply_to(message, f"<b>⚠️ Join our community!</b>\n👉 {COMMUNITY_LINK}", parse_mode="HTML")
     args = message.text.split()
-    if len(args) != 2:
-        bot.reply_to(message, "⚠️ Usage: <code>/redeem &lt;YOUR_KEY&gt;</code>", parse_mode="HTML")
-        return
-        
-    key_text = args[1]
-    user_id = message.from_user.id
-    
-    conn = sqlite3.connect('dumper.db')
-    c = conn.cursor()
-    c.execute("SELECT duration_days FROM keys WHERE key_text=?", (key_text,))
-    result = c.fetchone()
-    
+    if len(args) != 2: return bot.reply_to(message, "⚠️ Usage: <code>/redeem &lt;KEY&gt;</code>", parse_mode="HTML")
+    conn = sqlite3.connect('dumper.db'); c = conn.cursor()
+    c.execute("SELECT duration_days FROM keys WHERE key_text=?", (args[1],)); result = c.fetchone()
     if result:
-        duration_days = result[0]
-        c.execute("DELETE FROM keys WHERE key_text=?", (key_text,))
-        
-        c.execute("SELECT expiry_date FROM users WHERE user_id=?", (user_id,))
+        c.execute("DELETE FROM keys WHERE key_text=?", (args[1],))
+        c.execute("SELECT expiry_date FROM users WHERE user_id=?", (message.from_user.id,))
         user_res = c.fetchone()
-        
         now = datetime.now()
-        if user_res and datetime.fromisoformat(user_res[0]) > now:
-            new_expiry = datetime.fromisoformat(user_res[0]) + timedelta(days=duration_days)
-        else:
-            new_expiry = now + timedelta(days=duration_days)
-            
-        c.execute("INSERT OR REPLACE INTO users (user_id, expiry_date) VALUES (?, ?)", (user_id, new_expiry.isoformat()))
-        conn.commit()
-        conn.close()
-        
-        bot.reply_to(message, f"🎉 <b>Key Redeemed Successfully!</b>\n\nYou now have access to Legacy Dumper until <b>{new_expiry.strftime('%Y-%m-%d %H:%M:%S')}</b>.", parse_mode="HTML")
-    else:
-        conn.close()
-        bot.reply_to(message, "❌ <b>Invalid or already used key!</b>", parse_mode="HTML")
-
+        new_expiry = (datetime.fromisoformat(user_res[0]) if user_res and datetime.fromisoformat(user_res[0]) > now else now) + timedelta(days=result[0])
+        c.execute("INSERT OR REPLACE INTO users (user_id, expiry_date) VALUES (?, ?)", (message.from_user.id, new_expiry.isoformat()))
+        conn.commit(); conn.close()
+        bot.reply_to(message, f"🎉 <b>Redeemed!</b> Access until <b>{new_expiry.strftime('%Y-%m-%d %H:%M:%S')}</b>.", parse_mode="HTML")
+    else: conn.close(); bot.reply_to(message, "❌ <b>Invalid or used key!</b>", parse_mode="HTML")
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    if not check_membership(message.from_user.id):
-        bot.reply_to(message, f"<b>⚠️ Access Denied!</b>\n\nPlease join our community to use this bot.\n👉 {COMMUNITY_LINK}", parse_mode="HTML")
-        return
-
+    if not check_membership(message.from_user.id): return bot.reply_to(message, f"<b>⚠️ Join our community!</b>\n👉 {COMMUNITY_LINK}", parse_mode="HTML")
     user_states[message.chat.id] = {'step': 'waiting_for_original'}
     welcome = get_welcome_text(message.from_user.id)
-    
     if os.path.exists("banner.jpg"):
-        with open("banner.jpg", "rb") as photo:
-            bot.send_photo(message.chat.id, photo, caption=welcome, parse_mode="HTML", reply_markup=main_menu_keyboard())
-    else:
-        bot.reply_to(message, welcome, parse_mode="HTML", reply_markup=main_menu_keyboard())
+        with open("banner.jpg", "rb") as photo: bot.send_photo(message.chat.id, photo, caption=welcome, parse_mode="HTML", reply_markup=main_menu_keyboard())
+    else: bot.reply_to(message, welcome, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     if call.data == "help_menu":
-        if call.message.content_type == 'photo':
-            bot.edit_message_caption(caption=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
-        else:
-            bot.edit_message_text(text=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
+        if call.message.content_type == 'photo': bot.edit_message_caption(caption=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
+        else: bot.edit_message_text(text=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
     elif call.data == "main_menu":
         welcome = get_welcome_text(call.from_user.id)
-        if call.message.content_type == 'photo':
-            bot.edit_message_caption(caption=welcome, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
-        else:
-            bot.edit_message_text(text=welcome, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
+        if call.message.content_type == 'photo': bot.edit_message_caption(caption=welcome, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
+        else: bot.edit_message_text(text=welcome, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
-# Handle Text messages (URLs)
-@bot.message_handler(func=lambda message: message.text and (message.text.startswith('http://') or message.text.startswith('https://')))
-def handle_urls(message):
+def process_state_file(message, file_name, file_path_or_download_func, is_url=False):
     if not ensure_access(message): return
-
     chat_id = message.chat.id
-    url = message.text.strip()
-    
     if chat_id not in user_states: user_states[chat_id] = {'step': 'waiting_for_original'}
     state = user_states[chat_id]
-    
-    parsed_url = urlparse(url)
-    file_name = os.path.basename(parsed_url.path)
-    if not file_name or not file_name.endswith('.so'): file_name = "lib_downloaded.so"
-
-    msg = bot.reply_to(message, f"🔗 <b>Link detected!</b>\nDownloading <code>{file_name}</code>...", parse_mode="HTML")
     os.makedirs('tmp_files', exist_ok=True)
+    msg = bot.reply_to(message, f"⏳ Downloading <code>{file_name}</code>...", parse_mode="HTML")
+    
+    is_zip = file_name.lower().endswith('.zip')
     
     if state['step'] == 'waiting_for_original':
         file_path = f"tmp_files/orig_{chat_id}_{file_name}"
-        if download_from_url(url, file_path):
+        success = file_path_or_download_func(file_path) if is_url else file_path_or_download_func(file_path)
+        if success:
             state['original_path'] = file_path
-            state['lib_name'] = file_name.replace('.so', '')
+            state['is_zip'] = is_zip
             state['step'] = 'waiting_for_dump'
-            bot.edit_message_text(f"✅ Received <b>ORIGINAL</b> file: <code>{file_name}</code>\n\nNow, send me the <b>DUMPED</b> file (upload or link).", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
-        else: bot.edit_message_text("❌ Failed to download.", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+            bot.edit_message_text(f"✅ Received <b>ORIGINAL</b> {'Archive' if is_zip else 'File'}: <code>{file_name}</code>\n\nNow, send me the <b>DUMPED</b> {'Archive' if is_zip else 'File'} (Link or Upload).", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+        else: bot.edit_message_text("❌ Download failed.", chat_id=chat_id, message_id=msg.message_id)
             
     elif state['step'] == 'waiting_for_dump':
+        if is_zip != state.get('is_zip', False):
+            return bot.edit_message_text("⚠️ Format mismatch! Send a ZIP if you sent a ZIP originally, or a .so if you sent a .so originally.", chat_id=chat_id, message_id=msg.message_id)
+            
         file_path = f"tmp_files/dump_{chat_id}_{file_name}"
-        if download_from_url(url, file_path):
+        success = file_path_or_download_func(file_path) if is_url else file_path_or_download_func(file_path)
+        if success:
             state['dump_path'] = file_path
             state['step'] = 'processing'
-            bot.edit_message_text("✅ Dump downloaded! ⚙️ Processing files...", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
-            process_files(chat_id, msg)
-        else: bot.edit_message_text("❌ Failed to download.", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+            bot.edit_message_text("✅ Dump received! ⚙️ Processing...", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+            if is_zip: process_zip_files(chat_id, msg)
+            else: process_files(chat_id, msg)
+        else: bot.edit_message_text("❌ Download failed.", chat_id=chat_id, message_id=msg.message_id)
 
-# Handle Documents (Direct Uploads)
+@bot.message_handler(func=lambda m: m.text and (m.text.startswith('http://') or m.text.startswith('https://')))
+def handle_urls(message):
+    url = message.text.strip()
+    file_name = os.path.basename(urlparse(url).path)
+    if not file_name or (not file_name.endswith('.so') and not file_name.endswith('.zip')): file_name = "downloaded.so"
+    def download(path): return download_from_url(url, path)
+    process_state_file(message, file_name, download, True)
+
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
-    if not ensure_access(message): return
-
-    chat_id = message.chat.id
-    if chat_id not in user_states: user_states[chat_id] = {'step': 'waiting_for_original'}
-    state = user_states[chat_id]
-    
-    if message.document.file_size > 20 * 1024 * 1024:
-        bot.reply_to(message, "<b>⚠️ File is too large!</b>\nPlease send a <b>direct download link</b> instead.", parse_mode="HTML")
-        return
-
-    if not message.document.file_name.endswith('.so'):
-        bot.reply_to(message, "⚠️ Please upload a valid <code>.so</code> library file.", parse_mode="HTML")
-        return
-
-    msg = bot.reply_to(message, "⏳ Downloading file...")
+    if message.document.file_size > 20 * 1024 * 1024: return bot.reply_to(message, "<b>⚠️ File too large!</b>\nSend a <b>direct download link</b>.", parse_mode="HTML")
     file_name = message.document.file_name
-    file_info = bot.get_file(message.document.file_id)
-    downloaded_file = bot.download_file(file_info.file_path)
+    if not (file_name.endswith('.so') or file_name.endswith('.zip')): return bot.reply_to(message, "⚠️ Please upload a <code>.so</code> or <code>.zip</code> file.", parse_mode="HTML")
+    def download(path):
+        file_info = bot.get_file(message.document.file_id)
+        downloaded = bot.download_file(file_info.file_path)
+        with open(path, 'wb') as f: f.write(downloaded)
+        return True
+    process_state_file(message, file_name, download, False)
 
-    os.makedirs('tmp_files', exist_ok=True)
-    if state['step'] == 'waiting_for_original':
-        file_path = f"tmp_files/orig_{chat_id}_{file_name}"
-        with open(file_path, 'wb') as new_file: new_file.write(downloaded_file)
-        state['original_path'] = file_path
-        state['lib_name'] = file_name.replace('.so', '')
-        state['step'] = 'waiting_for_dump'
-        bot.edit_message_text(f"✅ Received <b>ORIGINAL</b> file: <code>{file_name}</code>\n\nNow, send me the <b>DUMPED</b> file.", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+def get_all_files(directory):
+    files = []
+    for root, _, filenames in os.walk(directory):
+        for filename in filenames:
+            if filename.endswith('.so'):
+                files.append(os.path.join(root, filename))
+    return files
+
+def process_zip_files(chat_id, status_message):
+    state = user_states.get(chat_id)
+    if not state: return
+    orig_zip, dump_zip = state['original_path'], state['dump_path']
+    orig_dir = f"tmp_files/orig_dir_{chat_id}"
+    dump_dir = f"tmp_files/dump_dir_{chat_id}"
+    out_dir = f"tmp_files/out_dir_{chat_id}"
+    
+    os.makedirs(orig_dir, exist_ok=True); os.makedirs(dump_dir, exist_ok=True); os.makedirs(out_dir, exist_ok=True)
+    extract_archive(orig_zip, orig_dir); extract_archive(dump_zip, dump_dir)
+    
+    orig_files = get_all_files(orig_dir)
+    dump_files = get_all_files(dump_dir)
+    
+    bot.edit_message_text("🔍 Extracting and matching libraries...", chat_id=chat_id, message_id=status_message.message_id)
+    
+    results = []
+    for orig_so in orig_files:
+        filename = os.path.basename(orig_so)
+        # Find matching dump file
+        matching_dump = next((d for d in dump_files if os.path.basename(d) == filename), None)
+        if matching_dump:
+            lib_name = filename.replace('.so', '')
+            start_addr, end_addr = get_auto_range(orig_so)
+            log_file = os.path.join(out_dir, f"Dump_{lib_name}.cpp")
+            patched_file = os.path.join(out_dir, f"PRO_{lib_name}.so")
+            
+            hooks = scan_single_dump_pro(orig_so, matching_dump, start_addr, end_addr, log_file, lib_name)
+            is_patched = patch_binary_pro(matching_dump, patched_file)
+            results.append((filename, hooks, is_patched))
+    
+    if not results:
+        bot.edit_message_text("⚠️ No matching .so files found in the archives.", chat_id=chat_id, message_id=status_message.message_id)
+    else:
+        summary = "✅ Processing complete:\n\n"
+        for fname, hooks, patched in results:
+            summary += f"📦 {fname}: {hooks} hooks | Patched: {'Yes' if patched else 'No'}\n"
+            
+        bot.edit_message_text(f"⚙️ Zipping results...\n{summary}", chat_id=chat_id, message_id=status_message.message_id)
+        out_zip = f"tmp_files/Results_{chat_id}.zip"
+        with zipfile.ZipFile(out_zip, 'w') as zf:
+            for root, _, files in os.walk(out_dir):
+                for file in files: zf.write(os.path.join(root, file), file)
         
-    elif state['step'] == 'waiting_for_dump':
-        file_path = f"tmp_files/dump_{chat_id}_{file_name}"
-        with open(file_path, 'wb') as new_file: new_file.write(downloaded_file)
-        state['dump_path'] = file_path
-        state['step'] = 'processing'
-        bot.edit_message_text("⚙️ Processing files... Please wait.", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
-        process_files(chat_id, msg)
+        if os.path.getsize(out_zip) > 49 * 1024 * 1024:
+            bot.edit_message_text("☁️ Result ZIP too large. Uploading to cloud...", chat_id=chat_id, message_id=status_message.message_id)
+            link = upload_to_gofile(out_zip)
+            if link: bot.send_message(chat_id, f"🛡️ <b>Results ZIP</b>\n👉 {link}", parse_mode="HTML")
+            else: bot.send_message(chat_id, "❌ Cloud upload failed.")
+        else:
+            with open(out_zip, 'rb') as f: bot.send_document(chat_id, f, caption=summary)
+        bot.delete_message(chat_id, status_message.message_id)
+        
+    # Cleanup
+    shutil.rmtree(orig_dir, ignore_errors=True); shutil.rmtree(dump_dir, ignore_errors=True); shutil.rmtree(out_dir, ignore_errors=True)
+    for p in [orig_zip, dump_zip, out_zip] if 'out_zip' in locals() else [orig_zip, dump_zip]:
+        if os.path.exists(p): os.remove(p)
+    user_states[chat_id] = {'step': 'waiting_for_original'}
 
 def process_files(chat_id, status_message):
     state = user_states.get(chat_id)
     if not state: return
-
-    orig_path, dump_path, lib_name = state['original_path'], state['dump_path'], state['lib_name']
+    orig_path, dump_path = state['original_path'], state['dump_path']
+    lib_name = os.path.basename(orig_path).replace('.so', '').replace('orig_', '').split('_', 1)[-1]
     start_addr, end_addr = get_auto_range(orig_path)
     
     log_file, patched_file = f"tmp_files/Dump_{lib_name}_{chat_id}.cpp", f"tmp_files/PRO_{lib_name}_{chat_id}.so"
+    bot.edit_message_text(f"🔍 Scanning {lib_name}...", chat_id=chat_id, message_id=status_message.message_id)
     
-    bot.edit_message_text("🔍 Scanning for important hooks...", chat_id=chat_id, message_id=status_message.message_id, parse_mode="HTML")
     hooks_found = scan_single_dump_pro(orig_path, dump_path, start_addr, end_addr, log_file, lib_name)
-    bot.edit_message_text(f"🔨 Scanning complete! Found <b>{hooks_found}</b> hooks.\nNow patching binary...", chat_id=chat_id, message_id=status_message.message_id, parse_mode="HTML")
-    
     is_patched = patch_binary_pro(dump_path, patched_file)
-    bot.edit_message_text("✅ Processing finished! Preparing results...", chat_id=chat_id, message_id=status_message.message_id, parse_mode="HTML")
     
     if os.path.exists(log_file):
-        with open(log_file, 'rb') as f: bot.send_document(chat_id, f, caption=f"📝 Offset Log ({hooks_found} hooks found)")
-            
+        with open(log_file, 'rb') as f: bot.send_document(chat_id, f, caption=f"📝 {lib_name} Offset Log ({hooks_found} hooks)")
     if is_patched and os.path.exists(patched_file):
         if os.path.getsize(patched_file) > 49 * 1024 * 1024:
-            bot.edit_message_text("☁️ File too large (>50MB). Uploading to cloud...", chat_id=chat_id, message_id=status_message.message_id, parse_mode="HTML")
-            download_link = upload_to_gofile(patched_file)
-            if download_link: bot.send_message(chat_id, f"🛡️ <b>Patched Dump</b>\n\n👉 {download_link}", parse_mode="HTML")
-            else: bot.send_message(chat_id, "❌ Error: Cloud upload failed.", parse_mode="HTML")
+            bot.edit_message_text("☁️ File too large. Uploading to cloud...", chat_id=chat_id, message_id=status_message.message_id)
+            link = upload_to_gofile(patched_file)
+            if link: bot.send_message(chat_id, f"🛡️ <b>Patched Dump</b>\n👉 {link}", parse_mode="HTML")
         else:
-            bot.send_chat_action(chat_id, 'upload_document')
             with open(patched_file, 'rb') as f: bot.send_document(chat_id, f, caption="🛡️ Patched Dump (Root Check Bypassed)")
         bot.delete_message(chat_id, status_message.message_id)
-    else: bot.send_message(chat_id, "⚠️ No root check patterns found to patch.", parse_mode="HTML")
+    else: bot.send_message(chat_id, "⚠️ No root check patterns found to patch.")
         
     for p in [orig_path, dump_path, log_file, patched_file]:
         if os.path.exists(p): os.remove(p)
-        
     user_states[chat_id] = {'step': 'waiting_for_original'}
-    bot.send_message(chat_id, "🔄 Send another <b>ORIGINAL</b> library file or link to start over.", parse_mode="HTML")
+    bot.send_message(chat_id, "🔄 Send another file or ZIP to start over.", parse_mode="HTML")
 
 if __name__ == '__main__':
     print("🤖 Legacy Dumper Bot is starting up...")
