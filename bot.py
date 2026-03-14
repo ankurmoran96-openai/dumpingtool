@@ -54,7 +54,7 @@ def ensure_access(message):
         bot.reply_to(message, f"<b>⚠️ Access Denied!</b>\n\nPlease join our community to use this bot.\n👉 {COMMUNITY_LINK}", parse_mode="HTML")
         return False
     if not is_authorized(user_id):
-        bot.reply_to(message, "<b>⛔ Subscription Required!</b>\n\nYou need an active subscription to use Legacy Dumper.\nPlease ask admins for a key and redeem it using <code>/redeem &lt;KEY&gt;</code>", parse_mode="HTML")
+        bot.reply_to(message, "<b>You don't have permission to use this bot, please get keys from authority</b>", parse_mode="HTML")
         return False
     return True
 
