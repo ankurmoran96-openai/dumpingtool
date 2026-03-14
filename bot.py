@@ -16,7 +16,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # --- CONFIGURATION ---
 # IMPORTANT: You must get your Community Channel ID (e.g. -100123456789) for the bot to check membership.
 # The bot MUST be an admin in that channel.
-COMMUNITY_ID = os.environ.get('COMMUNITY_ID', 'YOUR_CHANNEL_ID_HERE')
+COMMUNITY_ID = os.environ.get('COMMUNITY_ID', '-1003729793140')
 COMMUNITY_LINK = "https://t.me/+UZEwuXC7b_plZDJl"
 
 # Dictionary to keep track of user states (who is uploading what)
