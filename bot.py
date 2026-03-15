@@ -312,9 +312,9 @@ help_text = """<b>📚 How to Use Legacy Dumper</b>
 
 Follow these steps carefully to crack your target library:
 
-1️⃣ <b>Setup:</b> Use <code>/tools</code> to download the required Modded APK, Virtual, and Lua script.
-2️⃣ <b>Original File:</b> Upload the <b>ORIGINAL</b> <code>.so</code> file (extracted from the official APK).
-3️⃣ <b>Dumped File:</b> Use our Lua script in GameGuardian to generate a <b>DUMPED</b> <code>.so</code> and upload it here.
+1️⃣ <b>Setup:</b> Use <code>/tools</code> to download the required Virtual App and Lua script.
+2️⃣ <b>Original File:</b> Upload the <b>ORIGINAL</b> <code>.so</code> file (extracted from the <b>Official BGMI APK</b>).
+3️⃣ <b>Dumped File:</b> Use our Lua script in GameGuardian on your <b>Modded/Cheat APK</b> to generate a <b>DUMPED</b> <code>.so</code> and upload it here.
 4️⃣ <b>Scanning:</b> The bot will compare both files and detect all hooks/offsets automatically.
 5️⃣ <b>Patching:</b> You will receive a <b>Patched <code>.so</code></b> file with Root checks bypassed.
 
