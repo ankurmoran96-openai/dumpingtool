@@ -334,20 +334,20 @@ def send_tools_package(message):
     
     tools_msg = """<b>🛠️ Legacy Dumper - BGMI Setup Guide</b>
 
-Please use the following tools for a successful dump:
+To dump libraries successfully, follow these requirements:
 
-1. <b>MODDED BGMI APK:</b> Install this first to enable dumping.
-2. <b>VIRTUAL APP:</b> Required for non-root users.
-3. <b>LUA SCRIPT:</b> Execute this inside GameGuardian to dump libraries.
+1. <b>MODDED BGMI APK:</b> Use your own cracked/modded APK that allows for library dumping.
+2. <b>VIRTUAL APP:</b> Required if you are a non-root user.
+3. <b>LUA SCRIPT:</b> Execute this inside GameGuardian to dump the <code>.so</code> files.
 
 -------------------------------------------
 🚀 <b>INSTRUCTIONS:</b>
-• Open the <b>Modded Game</b> inside the Virtual (or with Root).
+• Open your <b>Modded Game</b> inside the Virtual (or with Root).
 • Open <b>GameGuardian</b> and select the game process.
 • Run the <b>LegacyCoreDumper.lua</b> script.
 • The dumped file will be saved at: <code>/sdcard/dump/</code>
 
-<b>Download the files below and start dumping!</b>"""
+<b>Download the required tools below!</b>"""
 
     bot.send_message(message.chat.id, tools_msg, parse_mode="HTML")
 
@@ -357,19 +357,13 @@ Please use the following tools for a successful dump:
         with open(script_path, "rb") as f:
             bot.send_document(message.chat.id, f, caption="🛡️ <b>Legacy Dumper Lua Script</b>", parse_mode="HTML")
     
-    # Placeholders for APKs - You should place these files in the 'tools/' folder
-    # or replace these with direct download links if they are too large for Telegram
-    files_to_send = {
-        "Modded_BGMI.apk": "tools/Modded_BGMI.apk",
-        "Virtual_App.apk": "tools/Virtual_App.apk"
-    }
-
-    for name, path in files_to_send.items():
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                bot.send_document(message.chat.id, f, caption=f"📦 <b>{name}</b>", parse_mode="HTML")
-        else:
-            bot.send_message(message.chat.id, f"⚠️ <i>{name} not found in tools folder. Contact Admin.</i>", parse_mode="HTML")
+    # Sending Virtual App
+    virtual_path = "tools/Virtual_App.apk"
+    if os.path.exists(virtual_path):
+        with open(virtual_path, "rb") as f:
+            bot.send_document(message.chat.id, f, caption="📦 <b>Virtual_App.apk</b>", parse_mode="HTML")
+    else:
+        bot.send_message(message.chat.id, "⚠️ <i>Virtual_App.apk not found in tools folder. Contact Admin.</i>", parse_mode="HTML")
 
 @bot.message_handler(commands=['dumplib'])
 def send_dump_instructions(message):
