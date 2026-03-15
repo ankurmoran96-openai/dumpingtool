@@ -312,7 +312,7 @@ help_text = """<b>📚 How to Use Legacy Dumper</b>
 
 Follow these steps carefully to crack your target library:
 
-1️⃣ <b>Setup:</b> Use <code>/tools</code> to download the required Virtual App and Lua script.
+1️⃣ <b>Setup:</b> Use <code>/dumplib</code> to download the required Virtual App and Lua script.
 2️⃣ <b>Original File:</b> Upload the <b>ORIGINAL</b> <code>.so</code> file (extracted from the <b>Official BGMI APK</b>).
 3️⃣ <b>Dumped File:</b> Use our Lua script in GameGuardian on your <b>Modded/Cheat APK</b> to generate a <b>DUMPED</b> <code>.so</code> and upload it here.
 4️⃣ <b>Scanning:</b> The bot will compare both files and detect all hooks/offsets automatically.
@@ -334,8 +334,8 @@ def admin_cmds(message):
     if message.from_user.id not in ADMIN_IDS: return
     bot.reply_to(message, admin_cmds_text, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
-@bot.message_handler(commands=['tools'])
-def send_tools_package(message):
+@bot.message_handler(commands=['dumplib'])
+def send_dumplib_package(message):
     if not ensure_access(message): return
     
     tools_msg = """<b>🛠️ Legacy Dumper - BGMI Setup Guide</b>
@@ -362,14 +362,16 @@ To dump libraries successfully, follow these requirements:
     files_to_close = []
 
     try:
+        # User requested: "select both files first and fhan in the captiom add that intuctooms"
+        # We add the caption to the FIRST file in the media group so it appears below both.
         if os.path.exists(script_path):
             f1 = open(script_path, 'rb')
-            media.append(telebot.types.InputMediaDocument(f1, caption=tools_msg if not media else None, parse_mode="HTML"))
+            media.append(telebot.types.InputMediaDocument(f1, caption=tools_msg, parse_mode="HTML"))
             files_to_close.append(f1)
         
         if os.path.exists(virtual_path):
             f2 = open(virtual_path, 'rb')
-            # If script wasn't found, this will be the first item and get the caption
+            # Only add caption if media is still empty (fallback)
             media.append(telebot.types.InputMediaDocument(f2, caption=tools_msg if not media else None, parse_mode="HTML"))
             files_to_close.append(f2)
 
@@ -383,11 +385,6 @@ To dump libraries successfully, follow these requirements:
     finally:
         for f in files_to_close:
             f.close()
-
-@bot.message_handler(commands=['dumplib'])
-def send_dump_instructions(message):
-    # Redirect to the main tools command for a consistent experience
-    send_tools_package(message)
 
 @bot.message_handler(commands=['users'])
 def list_users(message):
