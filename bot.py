@@ -250,9 +250,10 @@ def send_tools_package(message):
     script_path = "tools/LegacyCoreDumper.lua"
     if os.path.exists(script_path):
         with open(script_path, "rb") as f:
-            bot.send_document(message.chat.id, f, caption=tools_msg, parse_mode="HTML")
+            bot.send_document(message.chat.id, f, caption="🛡️ <b>Legacy Dumper Lua Script</b>", parse_mode="HTML")
+        send_long_message(message.chat.id, tools_msg)
     else:
-        bot.reply_to(message, tools_msg + "\n\n⚠️ <i>Script file not found. Contact Admin.</i>", parse_mode="HTML")
+        send_long_message(message.chat.id, tools_msg + "\n\n⚠️ <i>Script file not found. Contact Admin.</i>")
 
 @bot.message_handler(commands=['dumplib'])
 def send_dump_instructions(message):
