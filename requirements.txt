@@ -1,1 +1,2 @@
-python-telegram-bot\nrequests\nasyncio
+python-telegram-bot
+requests
