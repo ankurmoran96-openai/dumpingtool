@@ -293,6 +293,42 @@ def callback_query(call):
         if call.message.content_type == 'photo': bot.edit_message_caption(caption=welcome, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
         else: bot.edit_message_text(text=welcome, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
+@bot.message_handler(commands=['dumplib'])
+def send_dump_instructions(message):
+    if not ensure_access(message): return
+    instructions = """<b>🛠️ How to Dump Your Target Library</b>
+
+Follow these steps carefully to get the dumped <code>.so</code> file:
+
+1️⃣ <b>Setup GameGuardian</b>
+• Download: <a href="https://gameguardian.net/download">Official GameGuardian</a>
+• <b>Rooted?</b> Open GG directly.
+• <b>Non-Root?</b> You need a Virtual environment: [VIRTUAL_LINK_HERE]
+
+2️⃣ <b>Prepare the Environment</b>
+• Open your <b>Virtual</b> (if non-root).
+• Open <b>GameGuardian</b> and grant necessary permissions.
+• Start your <b>Target Game</b>.
+
+3️⃣ <b>Execute the Script</b>
+• Tap the <b>Floating GG Icon</b> in the game.
+• Click the <b>Play (Triangle)</b> button on the right sidebar.
+• Select the <b>LegacyCoreDumper.lua</b> file (sent below).
+• Select the <b>Target Game Process</b> when prompted.
+
+4️⃣ <b>Dump the Library</b>
+• Choose the library you want to dump from the list (e.g., <code>libanort.so</code>).
+• Wait for the success message.
+• Your file will be saved at: <code>/sdcard/dump/</code>
+
+📂 <b>Now, upload that dumped file here!</b>"""
+    
+    if os.path.exists("LegacyCoreDumper.lua"):
+        with open("LegacyCoreDumper.lua", "rb") as f:
+            bot.send_document(message.chat.id, f, caption=instructions, parse_mode="HTML")
+    else:
+        bot.reply_to(message, instructions + "\n\n⚠️ <i>Script file not found on server. Contact Admin.</i>", parse_mode="HTML")
+
 def process_state_file(message, file_name, file_path_or_download_func, is_url=False):
     if not ensure_access(message): return
     chat_id = message.chat.id
@@ -310,7 +346,7 @@ def process_state_file(message, file_name, file_path_or_download_func, is_url=Fa
             state['original_path'] = file_path
             state['is_zip'] = is_zip
             state['step'] = 'waiting_for_dump'
-            bot.edit_message_text(f"✅ Received <b>ORIGINAL</b> {'Archive' if is_zip else 'File'}: <code>{file_name}</code>\n\nNow, send me the <b>DUMPED</b> {'Archive' if is_zip else 'File'} (Link or Upload).", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+            bot.edit_message_text(f"✅ Received <b>ORIGINAL</b> {'Archive' if is_zip else 'File'}: <code>{file_name}</code>\n\nNow, send me the <b>DUMPED</b> {'Archive' if is_zip else 'File'} (Link or Upload).\n\n💡 Need to dump first? Use <code>/dumplib</code>", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
         else: bot.edit_message_text("❌ Download failed.", chat_id=chat_id, message_id=msg.message_id)
             
     elif state['step'] == 'waiting_for_dump':
