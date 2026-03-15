@@ -410,6 +410,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 def main():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(LOGS_DIR, exist_ok=True)
     init_db()
     
     app = ApplicationBuilder().token(BOT_TOKEN).build()
