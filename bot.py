@@ -190,9 +190,7 @@ def get_welcome_text(user_id):
 
 help_text = """<b>📚 Legacy Dumper - Step-by-Step Guide</b>\n
 <b>1️⃣ Preparation (The Lua Script)</b>
-• Run the <b>LegacyCoreDumper.lua</b> script in GameGuardian while your target game is open.
-• Select the library you want to dump (e.g., <code>libanort.so</code>).
-• The script will save a <code>.so</code> file to <code>/sdcard/dump/</code>.\n
+• Use <code>/tools</code> to get all necessary files and detailed setup instructions.\n
 <b>2️⃣ Using the Bot (Scanning & Patching)</b>
 • Send your <b>ORIGINAL</b> <code>.so</code> file (extracted from the APK) to this bot.
 • When prompted, send the <b>DUMPED</b> <code>.so</code> file (created by the Lua script).
@@ -217,6 +215,50 @@ def admin_cmds(message):
     if message.from_user.id not in ADMIN_IDS: return
     bot.reply_to(message, admin_cmds_text, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
+@bot.message_handler(commands=['tools'])
+def send_tools_package(message):
+    if not ensure_access(message): return
+    
+    tools_msg = """<b>🛠️ Legacy Dumper - Complete Setup Guide</b>
+
+⚠️ <b>IMPORTANT:</b> Please install the <b>MODDED APK</b> first before proceeding with these steps!
+
+-------------------------------------------
+🛡️ <b>FOR ROOT USERS:</b>
+1. Download & Install <a href="https://gameguardian.net/download">GameGuardian</a>.
+2. Open GG and grant <b>Root Permissions</b>.
+3. Open the Modded Game.
+4. Execute the <b>LegacyCoreDumper.lua</b> script (attached below).
+
+-------------------------------------------
+🔓 <b>FOR NON-ROOT USERS:</b>
+1. Download & Install <a href="https://gameguardian.net/download">GameGuardian</a>.
+2. Download & Install a <b>Virtual App</b>: <a href="[VIRTUAL_LINK_HERE]">Download Virtual</a>
+3. Add both <b>GG</b> and the <b>Modded Game</b> into the Virtual.
+4. Open GG inside the Virtual, then open the Game.
+5. Execute the <b>LegacyCoreDumper.lua</b> script (attached below).
+
+-------------------------------------------
+🚀 <b>FINAL EXECUTION:</b>
+• In GG, tap the <b>Play</b> button and select the script.
+• Select the <b>Target Game Process</b>.
+• Choose the library to dump (e.g., <code>libanort.so</code>).
+• The dumped file will be at: <code>/sdcard/dump/</code>
+
+<b>Go execute this and Send the dump file to crack the Offsets!</b>"""
+
+    script_path = "tools/LegacyCoreDumper.lua"
+    if os.path.exists(script_path):
+        with open(script_path, "rb") as f:
+            bot.send_document(message.chat.id, f, caption=tools_msg, parse_mode="HTML")
+    else:
+        bot.reply_to(message, tools_msg + "\n\n⚠️ <i>Script file not found. Contact Admin.</i>", parse_mode="HTML")
+
+@bot.message_handler(commands=['dumplib'])
+def send_dump_instructions(message):
+    # Redirect to the main tools command for a consistent experience
+    send_tools_package(message)
+
 @bot.message_handler(commands=['users'])
 def list_users(message):
     if message.from_user.id not in ADMIN_IDS: return
@@ -228,106 +270,6 @@ def list_users(message):
     active_users = c.fetchone()[0]
     conn.close()
     bot.reply_to(message, f"📊 <b>User Statistics</b>\n\n👥 Total Users: <code>{total_users}</code>\n✅ Active Users: <code>{active_users}</code>", parse_mode="HTML")
-
-@bot.message_handler(commands=['gen'])
-def generate_key(message):
-    if message.from_user.id not in ADMIN_IDS: return
-    args = message.text.split()
-    if len(args) != 3 or not args[2].lower().endswith('d'):
-        bot.reply_to(message, "⚠️ Usage: <code>/gen &lt;name&gt; &lt;days&gt;d</code>", parse_mode="HTML")
-        return
-    try: duration_days = int(args[2][:-1])
-    except ValueError: return bot.reply_to(message, "⚠️ Invalid duration.")
-    key_text = f"LGC-{args[1]}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=8))}"
-    conn = sqlite3.connect('dumper.db'); c = conn.cursor()
-    c.execute("INSERT INTO keys (key_text, duration_days) VALUES (?, ?)", (key_text, duration_days)); conn.commit(); conn.close()
-    bot.reply_to(message, f"✅ <b>Key Generated!</b>\n\n🔑 <code>{key_text}</code>\n⏱️ {duration_days} days\n<code>/redeem {key_text}</code>", parse_mode="HTML")
-
-@bot.message_handler(commands=['del'])
-def delete_key(message):
-    if message.from_user.id not in ADMIN_IDS: return
-    args = message.text.split()
-    if len(args) != 2:
-        return bot.reply_to(message, "⚠️ Usage: <code>/del &lt;KEY&gt;</code>", parse_mode="HTML")
-    key_text = args[1]
-    conn = sqlite3.connect('dumper.db'); c = conn.cursor()
-    c.execute("DELETE FROM keys WHERE key_text=?", (key_text,))
-    if c.rowcount > 0: bot.reply_to(message, f"✅ <b>Key Deleted:</b> <code>{key_text}</code>", parse_mode="HTML")
-    else: bot.reply_to(message, "❌ <b>Key not found!</b>", parse_mode="HTML")
-    conn.commit(); conn.close()
-
-@bot.message_handler(commands=['redeem'])
-def redeem_key(message):
-    if not check_membership(message.from_user.id): return bot.reply_to(message, f"<b>⚠️ Join our community!</b>\n👉 {COMMUNITY_LINK}", parse_mode="HTML")
-    args = message.text.split()
-    if len(args) != 2: return bot.reply_to(message, "⚠️ Usage: <code>/redeem &lt;KEY&gt;</code>", parse_mode="HTML")
-    conn = sqlite3.connect('dumper.db'); c = conn.cursor()
-    c.execute("SELECT duration_days FROM keys WHERE key_text=?", (args[1],)); result = c.fetchone()
-    if result:
-        c.execute("DELETE FROM keys WHERE key_text=?", (args[1],))
-        c.execute("SELECT expiry_date FROM users WHERE user_id=?", (message.from_user.id,))
-        user_res = c.fetchone()
-        now = datetime.now()
-        new_expiry = (datetime.fromisoformat(user_res[0]) if user_res and datetime.fromisoformat(user_res[0]) > now else now) + timedelta(days=result[0])
-        c.execute("INSERT OR REPLACE INTO users (user_id, expiry_date) VALUES (?, ?)", (message.from_user.id, new_expiry.isoformat()))
-        conn.commit(); conn.close()
-        bot.reply_to(message, f"🎉 <b>Redeemed!</b> Access until <b>{new_expiry.strftime('%Y-%m-%d %H:%M:%S')}</b>.", parse_mode="HTML")
-    else: conn.close(); bot.reply_to(message, "❌ <b>Invalid or used key!</b>", parse_mode="HTML")
-
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    if not check_membership(message.from_user.id): return bot.reply_to(message, f"<b>⚠️ Join our community!</b>\n👉 {COMMUNITY_LINK}", parse_mode="HTML")
-    user_states[message.chat.id] = {'step': 'waiting_for_original'}
-    welcome = get_welcome_text(message.from_user.id)
-    if os.path.exists("banner.jpg"):
-        with open("banner.jpg", "rb") as photo: bot.send_photo(message.chat.id, photo, caption=welcome, parse_mode="HTML", reply_markup=main_menu_keyboard())
-    else: bot.reply_to(message, welcome, parse_mode="HTML", reply_markup=main_menu_keyboard())
-
-@bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    if call.data == "help_menu":
-        if call.message.content_type == 'photo': bot.edit_message_caption(caption=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
-        else: bot.edit_message_text(text=help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
-    elif call.data == "main_menu":
-        welcome = get_welcome_text(call.from_user.id)
-        if call.message.content_type == 'photo': bot.edit_message_caption(caption=welcome, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
-        else: bot.edit_message_text(text=welcome, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
-
-@bot.message_handler(commands=['dumplib'])
-def send_dump_instructions(message):
-    if not ensure_access(message): return
-    instructions = """<b>🛠️ How to Dump Your Target Library</b>
-
-Follow these steps carefully to get the dumped <code>.so</code> file:
-
-1️⃣ <b>Setup GameGuardian</b>
-• Download: <a href="https://gameguardian.net/download">Official GameGuardian</a>
-• <b>Rooted?</b> Open GG directly.
-• <b>Non-Root?</b> You need a Virtual environment: [VIRTUAL_LINK_HERE]
-
-2️⃣ <b>Prepare the Environment</b>
-• Open your <b>Virtual</b> (if non-root).
-• Open <b>GameGuardian</b> and grant necessary permissions.
-• Start your <b>Target Game</b>.
-
-3️⃣ <b>Execute the Script</b>
-• Tap the <b>Floating GG Icon</b> in the game.
-• Click the <b>Play (Triangle)</b> button on the right sidebar.
-• Select the <b>LegacyCoreDumper.lua</b> file (sent below).
-• Select the <b>Target Game Process</b> when prompted.
-
-4️⃣ <b>Dump the Library</b>
-• Choose the library you want to dump from the list (e.g., <code>libanort.so</code>).
-• Wait for the success message.
-• Your file will be saved at: <code>/sdcard/dump/</code>
-
-📂 <b>Now, upload that dumped file here!</b>"""
-    
-    if os.path.exists("LegacyCoreDumper.lua"):
-        with open("LegacyCoreDumper.lua", "rb") as f:
-            bot.send_document(message.chat.id, f, caption=instructions, parse_mode="HTML")
-    else:
-        bot.reply_to(message, instructions + "\n\n⚠️ <i>Script file not found on server. Contact Admin.</i>", parse_mode="HTML")
 
 def process_state_file(message, file_name, file_path_or_download_func, is_url=False):
     if not ensure_access(message): return
