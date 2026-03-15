@@ -350,7 +350,7 @@ To dump libraries successfully, follow these requirements:
 <b>Download the required tools below!</b>"""
 
     script_path = "tools/LegacyCoreDumper.lua"
-    virtual_path = "tools/Virtual_App.apk"
+    virtual_path = "tools/Legacy Guardian.apk"
     
     media = []
     files_to_close = []
