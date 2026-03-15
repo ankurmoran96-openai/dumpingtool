@@ -195,14 +195,20 @@ def back_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.reply_to(message, get_welcome_text(message.from_user.id), parse_mode="HTML", reply_markup=main_menu_keyboard())
+    banner_path = "banner.jpg"
+    welcome_text = get_welcome_text(message.from_user.id)
+    if os.path.exists(banner_path):
+        with open(banner_path, 'rb') as photo:
+            bot.send_photo(message.chat.id, photo, caption=welcome_text, parse_mode="HTML", reply_markup=main_menu_keyboard())
+    else:
+        bot.reply_to(message, welcome_text, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     if call.data == "help_menu":
-        bot.edit_message_text(help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
+        bot.edit_message_caption(help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
     elif call.data == "back_to_main":
-        bot.edit_message_text(get_welcome_text(call.from_user.id), chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
+        bot.edit_message_caption(get_welcome_text(call.from_user.id), chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(commands=['gen'])
 def gen_key(message):
