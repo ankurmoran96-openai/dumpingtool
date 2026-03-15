@@ -343,8 +343,9 @@ def send_dumplib_package(message):
 To dump libraries successfully, follow these requirements:
 
 1. <b>MODDED BGMI APK:</b> Use your own cracked/modded APK that allows for library dumping.
-2. <b>VIRTUAL APP:</b> Required if you are a non-root user.
-3. <b>LUA SCRIPT:</b> Execute this inside GameGuardian to dump the <code>.so</code> files.
+2. <b>VIRTUAL APP:</b> Required if you are a non-root user (Download below).
+3. <b>GAMEGUARDIAN:</b> Download official GG here: <a href="https://gameguardian.net/download">Official Download</a>
+4. <b>LUA SCRIPT:</b> Execute this inside GameGuardian to dump the <code>.so</code> files.
 
 -------------------------------------------
 🚀 <b>INSTRUCTIONS:</b>
