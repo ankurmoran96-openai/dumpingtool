@@ -165,8 +165,9 @@ def extract_archive(archive_path, extract_to):
 # UI and Key commands
 def main_menu_keyboard():
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/LegacyDevX"), InlineKeyboardButton("👥 Community", url=COMMUNITY_LINK))
+    markup.add(InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/LegacyDevX"), InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/LegacyxAnku"))
     markup.add(InlineKeyboardButton("📖 Help & Guide", callback_data="help_menu"))
+    markup.add(InlineKeyboardButton("👥 Community", url=COMMUNITY_LINK))
     return markup
 
 def back_keyboard():
@@ -205,12 +206,24 @@ admin_cmds_text = """<b>🛡️ Admin Control Panel</b>\n
 <b>DEVELOPER: @legacyxanku</b>\n
 • <code>/gen &lt;name&gt; &lt;days&gt;d</code> - Generate a new subscription key.
 • <code>/del &lt;key&gt;</code> - Delete a specific key from the database.
-• <code>/users</code> - View total authorized users (Coming Soon)."""
+• <code>/users</code> - View total authorized users."""
 
 @bot.message_handler(commands=['admincmds'])
 def admin_cmds(message):
     if message.from_user.id not in ADMIN_IDS: return
     bot.reply_to(message, admin_cmds_text, parse_mode="HTML", reply_markup=main_menu_keyboard())
+
+@bot.message_handler(commands=['users'])
+def list_users(message):
+    if message.from_user.id not in ADMIN_IDS: return
+    conn = sqlite3.connect('dumper.db'); c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users")
+    total_users = c.fetchone()[0]
+    now = datetime.now().isoformat()
+    c.execute("SELECT COUNT(*) FROM users WHERE expiry_date > ?", (now,))
+    active_users = c.fetchone()[0]
+    conn.close()
+    bot.reply_to(message, f"📊 <b>User Statistics</b>\n\n👥 Total Users: <code>{total_users}</code>\n✅ Active Users: <code>{active_users}</code>", parse_mode="HTML")
 
 @bot.message_handler(commands=['gen'])
 def generate_key(message):
@@ -345,6 +358,7 @@ def format_offsets_for_telegram(lib_name, offsets):
     for offset in offsets:
         content += f"{offset}\n"
     full_msg = header + "<blockquote><pre>" + content + "</pre></blockquote>"
+    full_msg += "\n\n<b>Dumped By @LegacyDumperBot</b>"
     return full_msg
 
 def send_long_message(chat_id, text):
@@ -380,7 +394,8 @@ def process_zip_files(chat_id, status_message):
     if not results: bot.edit_message_text("⚠️ No matching .so files found.", chat_id=chat_id, message_id=status_message.message_id)
     else:
         summary = "✅ Done:\n" + "\n".join([f"📦 {f}: {h} hooks | Patched: {'Yes' if p else 'No'}" for f, h, p in results])
-        bot.edit_message_text(f"⚙️ Zipping results...\n{summary}", chat_id=chat_id, message_id=status_message.message_id)
+        summary += "\n\n<b>Dumped By @LegacyDumperBot</b>"
+        bot.edit_message_text(f"⚙️ Zipping results...\n{summary}", chat_id=chat_id, message_id=status_message.message_id, parse_mode="HTML")
         if all_extracted_text: send_long_message(chat_id, all_extracted_text)
         out_zip = f"tmp_files/Results_{chat_id}.zip"
         with zipfile.ZipFile(out_zip, 'w') as zf:
@@ -388,10 +403,13 @@ def process_zip_files(chat_id, status_message):
                 for file in files: zf.write(os.path.join(root, file), file)
         if os.path.getsize(out_zip) > 49 * 1024 * 1024:
             link = upload_to_gofile(out_zip)
-            if link: bot.send_message(chat_id, f"🛡️ <b>Results ZIP</b>\n👉 {link}", parse_mode="HTML")
+            if link: bot.send_message(chat_id, f"🛡️ <b>Results ZIP</b>\n👉 {link}\n\n<b>Dumped By @LegacyDumperBot</b>", parse_mode="HTML")
         else:
-            with open(out_zip, 'rb') as f: bot.send_document(chat_id, f, caption=summary)
-        bot.delete_message(chat_id, status_message.message_id)
+            with open(out_zip, 'rb') as f: bot.send_document(chat_id, f, caption=summary, parse_mode="HTML")
+        try:
+            bot.delete_message(chat_id, status_message.message_id)
+        except:
+            pass
     shutil.rmtree(orig_dir, ignore_errors=True); shutil.rmtree(dump_dir, ignore_errors=True); shutil.rmtree(out_dir, ignore_errors=True)
     for p in [orig_zip, dump_zip, out_zip] if 'out_zip' in locals() else [orig_zip, dump_zip]:
         if os.path.exists(p): os.remove(p)
@@ -407,17 +425,29 @@ def process_files(chat_id, status_message):
     bot.edit_message_text(f"🔍 Scanning {lib_name}...", chat_id=chat_id, message_id=status_message.message_id)
     hooks_found, extracted_offsets = scan_single_dump_pro(orig_path, dump_path, start_addr, end_addr, log_file, lib_name)
     is_patched = patch_binary_pro(dump_path, patched_file)
-    if extracted_offsets: send_long_message(chat_id, format_offsets_for_telegram(lib_name, extracted_offsets))
+    offset_msg = format_offsets_for_telegram(lib_name, extracted_offsets)
     if os.path.exists(log_file):
-        with open(log_file, 'rb') as f: bot.send_document(chat_id, f, caption=f"📝 {lib_name} Log ({hooks_found} hooks)")
+        caption = offset_msg if len(offset_msg) < 1024 else f"📝 {lib_name} Log ({hooks_found} hooks)\n\n<b>Dumped By @LegacyDumperBot</b>"
+        with open(log_file, 'rb') as f:
+            bot.send_document(chat_id, f, caption=caption, parse_mode="HTML")
+        if len(offset_msg) >= 1024:
+            send_long_message(chat_id, offset_msg)
+    elif extracted_offsets:
+        send_long_message(chat_id, offset_msg)
+
     if is_patched and os.path.exists(patched_file):
         if os.path.getsize(patched_file) > 49 * 1024 * 1024:
             link = upload_to_gofile(patched_file)
-            if link: bot.send_message(chat_id, f"🛡️ <b>Patched</b>\n👉 {link}", parse_mode="HTML")
+            if link: bot.send_message(chat_id, f"🛡️ <b>Patched</b>\n👉 {link}\n\n<b>Dumped By @LegacyDumperBot</b>", parse_mode="HTML")
         else:
-            with open(patched_file, 'rb') as f: bot.send_document(chat_id, f, caption="🛡️ Patched (Root Bypassed)")
+            with open(patched_file, 'rb') as f: bot.send_document(chat_id, f, caption="🛡️ Patched (Root Bypassed)\n\n<b>Dumped By @LegacyDumperBot</b>", parse_mode="HTML")
+    else:
+        bot.send_message(chat_id, "⚠️ No root check patterns found.\n\n<b>Dumped By @LegacyDumperBot</b>", parse_mode="HTML")
+    
+    try:
         bot.delete_message(chat_id, status_message.message_id)
-    else: bot.send_message(chat_id, "⚠️ No root check patterns found.")
+    except:
+        pass
     for p in [orig_path, dump_path, log_file, patched_file]:
         if os.path.exists(p): os.remove(p)
     user_states[chat_id] = {'step': 'waiting_for_original'}
