@@ -349,21 +349,34 @@ To dump libraries successfully, follow these requirements:
 
 <b>Download the required tools below!</b>"""
 
-    bot.send_message(message.chat.id, tools_msg, parse_mode="HTML")
-
-    # Sending Script
     script_path = "tools/LegacyCoreDumper.lua"
-    if os.path.exists(script_path):
-        with open(script_path, "rb") as f:
-            bot.send_document(message.chat.id, f, caption="🛡️ <b>Legacy Dumper Lua Script</b>", parse_mode="HTML")
-    
-    # Sending Virtual App
     virtual_path = "tools/Virtual_App.apk"
-    if os.path.exists(virtual_path):
-        with open(virtual_path, "rb") as f:
-            bot.send_document(message.chat.id, f, caption="📦 <b>Virtual_App.apk</b>", parse_mode="HTML")
-    else:
-        bot.send_message(message.chat.id, "⚠️ <i>Virtual_App.apk not found in tools folder. Contact Admin.</i>", parse_mode="HTML")
+    
+    media = []
+    files_to_close = []
+
+    try:
+        if os.path.exists(script_path):
+            f1 = open(script_path, 'rb')
+            media.append(telebot.types.InputMediaDocument(f1, caption=tools_msg if not media else None, parse_mode="HTML"))
+            files_to_close.append(f1)
+        
+        if os.path.exists(virtual_path):
+            f2 = open(virtual_path, 'rb')
+            # If script wasn't found, this will be the first item and get the caption
+            media.append(telebot.types.InputMediaDocument(f2, caption=tools_msg if not media else None, parse_mode="HTML"))
+            files_to_close.append(f2)
+
+        if media:
+            bot.send_media_group(message.chat.id, media)
+        else:
+            bot.reply_to(message, "⚠️ <b>Error:</b> No tools found in the tools folder. Contact Admin.", parse_mode="HTML")
+            
+    except Exception as e:
+        bot.reply_to(message, f"❌ <b>Failed to send tools:</b> {str(e)}", parse_mode="HTML")
+    finally:
+        for f in files_to_close:
+            f.close()
 
 @bot.message_handler(commands=['dumplib'])
 def send_dump_instructions(message):
