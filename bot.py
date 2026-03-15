@@ -3,6 +3,7 @@ import sqlite3
 import random
 import string
 import telebot
+from telebot import apihelper
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import requests
 from datetime import datetime, timedelta
@@ -16,8 +17,18 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '8611766126:AAE3QdKQHauKc99qs2D8wmE0GwZp
 COMMUNITY_ID = os.environ.get('COMMUNITY_ID', '-1003729793140')
 COMMUNITY_LINK = "https://t.me/+UZEwuXC7b_plZDJl"
 ADMIN_IDS = [5707956654, 6049120581]
+PROXY_URL = os.environ.get('PROXY_URL')
+
+# Apply proxy if provided for telebot
+if PROXY_URL:
+    apihelper.proxy = {'https': PROXY_URL, 'http': PROXY_URL}
 
 bot = telebot.TeleBot(BOT_TOKEN)
+
+def get_requests_proxies():
+    if PROXY_URL:
+        return {'https': PROXY_URL, 'http': PROXY_URL}
+    return None
 
 user_states = {}
 
@@ -142,17 +153,19 @@ def patch_binary_pro(dump_path, output_path):
 
 def upload_to_gofile(file_path):
     try:
-        server_res = requests.get("https://api.gofile.io/servers").json()
+        proxies = get_requests_proxies()
+        server_res = requests.get("https://api.gofile.io/servers", proxies=proxies).json()
         if server_res['status'] != 'ok': return None
         server = server_res['data']['servers'][0]['name']
-        with open(file_path, 'rb') as f: upload_res = requests.post(f"https://{server}.gofile.io/contents/uploadfile", files={'file': f}).json()
+        with open(file_path, 'rb') as f: upload_res = requests.post(f"https://{server}.gofile.io/contents/uploadfile", files={'file': f}, proxies=proxies).json()
         if upload_res['status'] == 'ok': return upload_res['data']['downloadPage']
         return None
     except Exception: return None
 
 def download_from_url(url, file_path):
     try:
-        response = requests.get(url, stream=True)
+        proxies = get_requests_proxies()
+        response = requests.get(url, stream=True, proxies=proxies)
         response.raise_for_status()
         with open(file_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
