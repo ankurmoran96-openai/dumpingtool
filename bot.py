@@ -33,12 +33,17 @@ init_db()
 
 def is_authorized(user_id):
     if user_id in ADMIN_IDS: return True
-    conn = sqlite3.connect('dumper.db')
-    c = conn.cursor()
-    c.execute("SELECT expiry_date FROM users WHERE user_id=?", (user_id,))
-    result = c.fetchone()
-    conn.close()
-    if result and datetime.now() < datetime.fromisoformat(result[0]): return True
+    try:
+        conn = sqlite3.connect('dumper.db')
+        c = conn.cursor()
+        c.execute("SELECT expiry_date FROM users WHERE user_id=?", (user_id,))
+        result = c.fetchone()
+        conn.close()
+        if result:
+            expiry = datetime.fromisoformat(result[0])
+            if datetime.now() < expiry: return True
+    except Exception:
+        pass
     return False
 
 def check_membership(user_id):
@@ -171,8 +176,98 @@ def main_menu_keyboard():
     return markup
 
 def back_keyboard():
-    # Updating to match main_menu_keyboard exactly as requested
-    return main_menu_keyboard()
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("⬅️ Back to Main", callback_data="back_to_main"))
+    return markup
+
+@bot.message_handler(commands=['start'])
+def start_cmd(message):
+    bot.reply_to(message, get_welcome_text(message.from_user.id), parse_mode="HTML", reply_markup=main_menu_keyboard())
+
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    if call.data == "help_menu":
+        bot.edit_message_text(help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
+    elif call.data == "back_to_main":
+        bot.edit_message_text(get_welcome_text(call.from_user.id), chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
+
+@bot.message_handler(commands=['gen'])
+def gen_key(message):
+    if message.from_user.id not in ADMIN_IDS: return
+    try:
+        args = message.text.split()
+        if len(args) < 2:
+            return bot.reply_to(message, "⚠️ Usage: <code>/gen &lt;name&gt; &lt;days&gt;d</code>\nExample: <code>/gen user1 30d</code>", parse_mode="HTML")
+        
+        name = args[1]
+        days_str = args[2] if len(args) > 2 else "30d"
+        days = int(days_str.replace('d', ''))
+        
+        key = "LEGACY-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
+        
+        conn = sqlite3.connect('dumper.db'); c = conn.cursor()
+        c.execute("INSERT INTO keys (key_text, duration_days) VALUES (?, ?)", (key, days))
+        conn.commit(); conn.close()
+        
+        bot.reply_to(message, f"🔑 <b>Key Generated Successfully!</b>\n\n👤 Name: <code>{name}</code>\n⏳ Duration: <code>{days} days</code>\n🎟️ Key: <code>{key}</code>\n\n<i>Copy and send to the user.</i>", parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"❌ <b>Error:</b> {str(e)}", parse_mode="HTML")
+
+@bot.message_handler(commands=['redeem'])
+def redeem_key(message):
+    args = message.text.split()
+    if len(args) < 2:
+        return bot.reply_to(message, "⚠️ Usage: <code>/redeem &lt;key&gt;</code>\nExample: <code>/redeem LEGACY-ABC123XYZ</code>", parse_mode="HTML")
+    
+    key = args[1]
+    user_id = message.from_user.id
+    
+    try:
+        conn = sqlite3.connect('dumper.db'); c = conn.cursor()
+        c.execute("SELECT duration_days FROM keys WHERE key_text=?", (key,))
+        result = c.fetchone()
+        
+        if not result:
+            conn.close()
+            return bot.reply_to(message, "❌ <b>Invalid or used key!</b>", parse_mode="HTML")
+        
+        days = result[0]
+        c.execute("DELETE FROM keys WHERE key_text=?", (key,))
+        
+        # Calculate new expiry
+        c.execute("SELECT expiry_date FROM users WHERE user_id=?", (user_id,))
+        user_res = c.fetchone()
+        
+        current_expiry = datetime.now()
+        if user_res:
+            try:
+                old_expiry = datetime.fromisoformat(user_res[0])
+                if old_expiry > current_expiry: current_expiry = old_expiry
+            except: pass
+            
+        new_expiry = (current_expiry + timedelta(days=days)).isoformat()
+        c.execute("INSERT OR REPLACE INTO users (user_id, expiry_date) VALUES (?, ?)", (user_id, new_expiry))
+        
+        conn.commit(); conn.close()
+        bot.reply_to(message, f"✅ <b>Success!</b>\nSubscription activated for <code>{days} days</code>.\n📅 New Expiry: <code>{new_expiry[:10]}</code>", parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"❌ <b>Redeem Error:</b> {str(e)}", parse_mode="HTML")
+
+@bot.message_handler(commands=['del'])
+def delete_key(message):
+    if message.from_user.id not in ADMIN_IDS: return
+    args = message.text.split()
+    if len(args) < 2:
+        return bot.reply_to(message, "⚠️ Usage: <code>/del &lt;key&gt;</code>", parse_mode="HTML")
+    
+    key = args[1]
+    try:
+        conn = sqlite3.connect('dumper.db'); c = conn.cursor()
+        c.execute("DELETE FROM keys WHERE key_text=?", (key,))
+        conn.commit(); conn.close()
+        bot.reply_to(message, f"🗑️ Key <code>{key}</code> deleted from database.", parse_mode="HTML")
+    except Exception as e:
+        bot.reply_to(message, f"❌ <b>Delete Error:</b> {str(e)}", parse_mode="HTML")
 
 def get_welcome_text(user_id):
     sub_status = "✅ <b>Active</b>" if is_authorized(user_id) else "❌ <b>Inactive</b> (Use /redeem)"
@@ -346,10 +441,26 @@ def format_offsets_for_telegram(lib_name, offsets):
 
 def send_long_message(chat_id, text):
     if len(text) <= 4096:
-        bot.send_message(chat_id, text, parse_mode="HTML")
+        try: bot.send_message(chat_id, text, parse_mode="HTML")
+        except: bot.send_message(chat_id, text) # Fallback if HTML is broken
     else:
-        for i in range(0, len(text), 4096):
-            bot.send_message(chat_id, text[i:i+4096], parse_mode="HTML")
+        # Split by newline to avoid breaking HTML tags mid-line
+        parts = []
+        while len(text) > 0:
+            if len(text) <= 4096:
+                parts.append(text)
+                break
+            
+            # Find last newline within limit
+            split_idx = text.rfind('\n', 0, 4096)
+            if split_idx == -1: split_idx = 4096 # Force split if no newline
+            
+            parts.append(text[:split_idx])
+            text = text[split_idx:].lstrip()
+            
+        for part in parts:
+            try: bot.send_message(chat_id, part, parse_mode="HTML")
+            except: bot.send_message(chat_id, part)
 
 def process_zip_files(chat_id, status_message):
     state = user_states.get(chat_id)
@@ -437,4 +548,5 @@ def process_files(chat_id, status_message):
 
 if __name__ == '__main__':
     print("🤖 Legacy Dumper Bot is starting up...")
-    bot.infinity_polling()
+    # Add timeouts for better reliability on environments like Railway
+    bot.infinity_polling(timeout=10, long_polling_timeout=5)
