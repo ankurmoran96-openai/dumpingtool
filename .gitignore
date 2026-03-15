@@ -1,0 +1,22 @@
+# Databases
+dumper.db
+
+# Large Binaries
+base_libs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+venv/
+.venv/
+
+# Temp files
+tmp_files/
+tmp/
+*.log
+
+# User specific files
+.DS_Store
+Thumbs.db

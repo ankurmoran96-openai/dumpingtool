@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 import zipfile
 import shutil
 import re
+import mmap
+import time
 
 # --- CONFIGURATION ---
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8611766126:AAE3QdKQHauKc99qs2D8wmE0GwZpGNyU7hk')
@@ -98,39 +100,55 @@ def is_important_pattern(data, offset):
 
 def scan_single_dump_pro(original_path, dump_path, start_offset, end_offset, log_file, lib_name):
     if not os.path.exists(original_path) or not os.path.exists(dump_path): return 0, []
-    try:
-        with open(original_path, "rb") as f1: original_data = f1.read()
-        with open(dump_path, "rb") as f2: dump_data = f2.read()
-    except Exception: return 0, []
 
-    file_size = min(len(original_data), len(dump_data), end_offset)
+    f1 = open(original_path, "rb")
+    f2 = open(dump_path, "rb")
+
+    # Use memory mapping for large files (like libUE4.so)
+    try:
+        m1 = mmap.mmap(f1.fileno(), 0, access=mmap.ACCESS_READ)
+        m2 = mmap.mmap(f2.fileno(), 0, access=mmap.ACCESS_READ)
+    except Exception:
+        f1.close(); f2.close()
+        return 0, []
+
+    file_size = min(len(m1), len(m2), end_offset)
     try:
         with open(log_file, "w", encoding='utf-8') as log:
-            log.write(f"=== LEGACY DUMPER PVT TOOL ===\nLibrary: {lib_name}\nScan Time: {datetime.now()}\nOriginal: {os.path.basename(original_path)}\nDump: {os.path.basename(dump_path)}\n" + "=" * 50 + "\n\n")
-    except Exception: return 0, []
+            log.write(f"=== LEGACY CORE PVT TOOL ===\nLibrary: {lib_name}\nScan Time: {datetime.now()}\nOriginal: {os.path.basename(original_path)}\nDump: {os.path.basename(dump_path)}\n" + "=" * 50 + "\n\n")
+    except Exception:
+        m1.close(); m2.close()
+        f1.close(); f2.close()
+        return 0, []
 
     hooks_found = 0
     extracted_offsets = []
     i = start_offset
+
     with open(log_file, "a", encoding='utf-8') as log:
         while i < file_size:
-            if original_data[i] != dump_data[i]:
-                pattern_name, pattern_bytes = is_important_pattern(dump_data, i)
+            # Check for differences first (fast comparison)
+            if m1[i] != m2[i]:
+                # If a difference is found, check for important patterns in the dumped file
+                pattern_name, pattern_bytes = is_important_pattern(m2, i)
                 if pattern_name:
                     if pattern_name == "HOOK_SIGNATURE":
                         log.write(f"0x{i:06X} HOOK OFFSET\n")
                         extracted_offsets.append(f"0x{i:06X} // HOOK_SIGNATURE")
                         hooks_found += 1
-                        i += 16
+                        i += 16 # Skip the rest of the hook signature
                     else:
-                        hex_str = ' '.join(f"{dump_data[i + j]:02X}" for j in range(len(pattern_bytes)))
+                        hex_str = ' '.join(f"{m2[i + j]:02X}" for j in range(len(pattern_bytes)))
                         log.write(f"0x{i:06X} {hex_str} // {pattern_name}\n")
                         extracted_offsets.append(f"0x{i:06X} // {pattern_name}")
                         hooks_found += 1
                         i += len(pattern_bytes)
-                else: i += 1
+                else: i += 1 # Not an important pattern, just a random difference
             else: i += 1
         log.write(f"\n" + "=" * 50 + f"\nTOTAL IMPORTANT HOOKS: {hooks_found}\nLIBRARY: {lib_name}\nSCAN COMPLETED: {datetime.now()}\n")
+
+    m1.close(); m2.close()
+    f1.close(); f2.close()
     return hooks_found, extracted_offsets
 
 def patch_binary_pro(dump_path, output_path):
@@ -183,7 +201,7 @@ def extract_archive(archive_path, extract_to):
 # UI and Key commands
 def main_menu_keyboard():
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/LegacyDevX"), InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/LegacyxAnku"))
+    markup.add(InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/LegacyDevX"), InlineKeyboardButton("👨‍💻 Developer", url="https://t.me/LegacyDevX"))
     markup.add(InlineKeyboardButton("📖 Help & Guide", callback_data="help_menu"))
     markup.add(InlineKeyboardButton("👥 Community", url=COMMUNITY_LINK))
     return markup
@@ -191,6 +209,11 @@ def main_menu_keyboard():
 def back_keyboard():
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("⬅️ Back to Main", callback_data="back_to_main"))
+    return markup
+
+def done_keyboard():
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("✅ Done Dumping", callback_data="dump_done"))
     return markup
 
 @bot.message_handler(commands=['start'])
@@ -205,10 +228,16 @@ def start_cmd(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
+    chat_id = call.message.chat.id
     if call.data == "help_menu":
-        bot.edit_message_caption(help_text, chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
+        bot.edit_message_caption(help_text, chat_id=chat_id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=back_keyboard())
     elif call.data == "back_to_main":
-        bot.edit_message_caption(get_welcome_text(call.from_user.id), chat_id=call.message.chat.id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
+        bot.edit_message_caption(get_welcome_text(call.from_user.id), chat_id=chat_id, message_id=call.message.message_id, parse_mode="HTML", reply_markup=main_menu_keyboard())
+    elif call.data == "dump_done":
+        try: bot.delete_message(chat_id, call.message.message_id)
+        except: pass
+        user_states[chat_id] = {'step': 'waiting_for_dump'}
+        bot.send_message(chat_id, "🚀 <b>Excellent!</b> Now please upload the <b>DUMPED</b> <code>.so</code> file you generated.\n\n<i>You can also send a direct download link.</i>", parse_mode="HTML")
 
 @bot.message_handler(commands=['gen'])
 def gen_key(message):
@@ -290,71 +319,61 @@ def delete_key(message):
 
 def get_welcome_text(user_id):
     sub_status = "✅ <b>Active</b>" if is_authorized(user_id) else "❌ <b>Inactive</b> (Use /redeem)"
-    return f"""<b>🚀 Legacy Dumper Bot</b>
+    return f"""<b>🚀 Legacy Core Dumper</b>
 
-This bot is specifically designed for <b>BGMI (Battlegrounds Mobile India)</b> and other Unreal Engine games. It automates the process of scanning, dumping, and patching <code>.so</code> libraries to bypass security checks.
+This bot is specifically designed for <b>BGMI</b> and other UE4 games. Use the <b>/dump</b> command to get the required tools and start scanning your targeted modded APKs.
 
 <b>🌟 Main Features:</b>
-✅ <b>Auto-Dumping:</b> Scans original vs dumped libs.
-✅ <b>Hook Detection:</b> Identifies sensitive security offsets.
-✅ <b>Pro Patching:</b> Automatically bypasses Root/Security checks.
-✅ <b>Bulk Processing:</b> Supports <code>.zip</code> archives for multiple files.
+✅ <b>Instant-Scan:</b> No need for original files (6+ Libs Supported).
+✅ <b>Memory Mapping:</b> Fast scanning of 200MB+ libraries.
+✅ <b>Interactive Workflow:</b> Integrated dumping guide and tools.
+✅ <b>One-Step Results:</b> Automated comparison and offset extraction.
 
 <b>🔑 Subscription:</b> {sub_status}
 
 <b>👨‍💻 Credits:</b>
 • <b>Owner:</b> @LegacyDevX
-• <b>Developer:</b> @LegacyxAnku
+• <b>Developer:</b> @LegacyDevX
 
-<i>Use the buttons below to navigate.</i>"""
+<i>Use <b>/dump</b> to start!</i>"""
 
-help_text = """<b>📚 How to Use Legacy Dumper</b>
+help_text = """<b>📚 How to Use Legacy Core</b>
 
-Follow these steps carefully to crack your target library:
-
-1️⃣ <b>Setup:</b> Use <code>/dumplib</code> to download the required Virtual App and Lua script.
-2️⃣ <b>Original File:</b> Upload the <b>ORIGINAL</b> <code>.so</code> file (extracted from the <b>Official BGMI APK</b>).
-3️⃣ <b>Dumped File:</b> Use our Lua script in GameGuardian on your <b>Modded/Cheat APK</b> to generate a <b>DUMPED</b> <code>.so</code> and upload it here.
-4️⃣ <b>Scanning:</b> The bot will compare both files and detect all hooks/offsets automatically.
-5️⃣ <b>Patching:</b> You will receive a <b>Patched <code>.so</code></b> file with Root checks bypassed.
-
-<b>💡 Pro Tip:</b> For multiple libraries, put them in a ZIP file (e.g., <code>orig.zip</code> and <code>dump.zip</code>) and send them in order!
+1️⃣ <b>Initialize:</b> Use the <code>/dump</code> command to get the setup tools.
+2️⃣ <b>Dumping:</b> Follow the guide to dump your targeted <code>.so</code> file from memory using the provided Lua script.
+3️⃣ <b>Upload:</b> Click "Done" and upload your <b>DUMPED</b> file.
+4️⃣ <b>Results:</b> The bot will automatically analyze the file and provide all detected offsets.
 
 🛡️ <b>Support:</b> Contact @LegacyDevX for keys or help."""
 
 admin_cmds_text = """<b>🛡️ Admin Control Panel</b>\n
 <b>OWNER: @LegacyDevX</b>
-<b>DEVELOPER: @legacyxanku</b>\n
+<b>DEVELOPER: @LegacyDevX</b>\n
 • <code>/gen &lt;name&gt; &lt;days&gt;d</code> - Generate a new subscription key.
 • <code>/del &lt;key&gt;</code> - Delete a specific key from the database.
+• <code>/addbase</code> - Upload an official library to the base database.
 • <code>/users</code> - View total authorized users."""
 
-@bot.message_handler(commands=['admincmds'])
-def admin_cmds(message):
-    if message.from_user.id not in ADMIN_IDS: return
-    bot.reply_to(message, admin_cmds_text, parse_mode="HTML", reply_markup=main_menu_keyboard())
-
-@bot.message_handler(commands=['dumplib'])
-def send_dumplib_package(message):
+@bot.message_handler(commands=['dump'])
+def dump_cmd(message):
     if not ensure_access(message): return
     
-    tools_msg = """<b>🛠️ Legacy Dumper - BGMI Setup Guide</b>
+    instructions = """<b>🛠️ Legacy Core - BGMI Dumping Guide</b>
 
-To dump libraries successfully, follow these requirements:
+Please use the tools below to dump your targeted modded APK:
 
-1. <b>MODDED BGMI APK:</b> Use your own cracked/modded APK that allows for library dumping.
-2. <b>VIRTUAL APP:</b> Required if you are a non-root user (Download below).
-3. <b>GAMEGUARDIAN:</b> Download official GG here: <a href="https://gameguardian.net/download">Official Download</a>
-4. <b>LUA SCRIPT:</b> Execute this inside GameGuardian to dump the <code>.so</code> files.
+1. <b>MODDED BGMI APK:</b> Ensure your modded APK is installed.
+2. <b>VIRTUAL APP:</b> Use the provided "Legacy Guardian" for non-root setup.
+3. <b>LUA SCRIPT:</b> Run the obfuscated "LegacyCoreDumper.lua" in GameGuardian.
 
 -------------------------------------------
 🚀 <b>INSTRUCTIONS:</b>
-• Open your <b>Modded Game</b> inside the Virtual (or with Root).
-• Open <b>GameGuardian</b> and select the game process.
-• Run the <b>LegacyCoreDumper.lua</b> script.
-• The dumped file will be saved at: <code>/sdcard/dump/</code>
+• Open the <b>Modded Game</b> inside the Virtual app.
+• Select the game process in <b>GameGuardian</b>.
+• Execute the <b>LegacyCoreDumper.lua</b> script.
+• Your dump will be saved at: <code>/sdcard/dump/</code>
 
-<b>Download the required tools below!</b>"""
+<b>⚠️ Tap the button below ONLY after you have finished dumping!</b>"""
 
     script_path = "tools/LegacyCoreDumper.lua"
     virtual_path = "tools/Legacy Guardian.apk"
@@ -363,29 +382,41 @@ To dump libraries successfully, follow these requirements:
     files_to_close = []
 
     try:
-        # User requested: "select both files first and fhan in the captiom add that intuctooms"
-        # We add the caption to the FIRST file in the media group so it appears below both.
         if os.path.exists(script_path):
             f1 = open(script_path, 'rb')
-            media.append(telebot.types.InputMediaDocument(f1, caption=tools_msg, parse_mode="HTML"))
+            media.append(telebot.types.InputMediaDocument(f1))
             files_to_close.append(f1)
         
         if os.path.exists(virtual_path):
             f2 = open(virtual_path, 'rb')
-            # Only add caption if media is still empty (fallback)
-            media.append(telebot.types.InputMediaDocument(f2, caption=tools_msg if not media else None, parse_mode="HTML"))
+            media.append(telebot.types.InputMediaDocument(f2))
             files_to_close.append(f2)
 
         if media:
+            # Add caption to the last file to ensure it shows with the button
+            media[-1].caption = instructions
+            media[-1].parse_mode = "HTML"
             bot.send_media_group(message.chat.id, media)
+            # Send the button separately as media group doesn't support inline buttons on captions well
+            bot.send_message(message.chat.id, "⬇️ <b>Setup Complete! Tap when ready:</b>", parse_mode="HTML", reply_markup=done_keyboard())
         else:
-            bot.reply_to(message, "⚠️ <b>Error:</b> No tools found in the tools folder. Contact Admin.", parse_mode="HTML")
+            bot.reply_to(message, "⚠️ <b>Error:</b> Tools folder is empty. Contact Admin.", parse_mode="HTML")
             
     except Exception as e:
-        bot.reply_to(message, f"❌ <b>Failed to send tools:</b> {str(e)}", parse_mode="HTML")
+        bot.reply_to(message, f"❌ <b>Error:</b> {str(e)}", parse_mode="HTML")
     finally:
-        for f in files_to_close:
-            f.close()
+        for f in files_to_close: f.close()
+
+@bot.message_handler(commands=['addbase'])
+def add_base_cmd(message):
+    if message.from_user.id not in ADMIN_IDS: return
+    user_states[message.chat.id] = {'step': 'waiting_for_base_lib'}
+    bot.reply_to(message, "📤 Please upload the <b>OFFICIAL (Clean)</b> <code>.so</code> file to add to the base database.", parse_mode="HTML")
+
+@bot.message_handler(commands=['admincmds'])
+def admin_cmds(message):
+    if message.from_user.id not in ADMIN_IDS: return
+    bot.reply_to(message, admin_cmds_text, parse_mode="HTML", reply_markup=main_menu_keyboard())
 
 @bot.message_handler(commands=['users'])
 def list_users(message):
@@ -402,12 +433,52 @@ def list_users(message):
 def process_state_file(message, file_name, file_path_or_download_func, is_url=False):
     if not ensure_access(message): return
     chat_id = message.chat.id
+    
+    # Handle Admin adding base lib
+    if chat_id in user_states and user_states[chat_id].get('step') == 'waiting_for_base_lib':
+        if not file_name.endswith('.so'):
+            return bot.reply_to(message, "❌ Please upload a <code>.so</code> file for the base database.", parse_mode="HTML")
+        os.makedirs('base_libs', exist_ok=True)
+        base_path = f"base_libs/{file_name}"
+        success = file_path_or_download_func(base_path)
+        if success:
+            bot.reply_to(message, f"✅ <b>{file_name}</b> has been added to the Official Base Database.", parse_mode="HTML")
+            user_states[chat_id] = {'step': 'waiting_for_original'}
+        else:
+            bot.reply_to(message, "❌ Failed to save base library.")
+        return
+
     if chat_id not in user_states: user_states[chat_id] = {'step': 'waiting_for_original'}
     state = user_states[chat_id]
     os.makedirs('tmp_files', exist_ok=True)
-    msg = bot.reply_to(message, f"⏳ Downloading <code>{file_name}</code>...", parse_mode="HTML")
     
     is_zip = file_name.lower().endswith('.zip')
+    
+    # Check if a base library exists for this file
+    if state['step'] == 'waiting_for_original' and not is_zip:
+        base_lib_path = f"base_libs/{file_name}"
+        if os.path.exists(base_lib_path):
+            msg = bot.reply_to(message, f"🔍 <b>Base Match Found!</b>\nDownloading your dump: <code>{file_name}</code>...", parse_mode="HTML")
+            dump_path = f"tmp_files/dump_{chat_id}_{file_name}"
+            success = file_path_or_download_func(dump_path)
+            if success:
+                state['original_path'] = base_lib_path
+                state['dump_path'] = dump_path
+                state['step'] = 'processing'
+                
+                # Animated Processing
+                bot.edit_message_text("🔄 <b>Comparing libs...</b>", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+                time.sleep(1)
+                bot.edit_message_text("🔍 <b>Analyzing offsets...</b>", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+                time.sleep(1)
+                bot.edit_message_text("⚙️ <b>Finishing up...</b>", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+                
+                process_files(chat_id, msg)
+                return
+            else:
+                return bot.edit_message_text("❌ Download failed.", chat_id=chat_id, message_id=msg.message_id)
+
+    msg = bot.reply_to(message, f"⏳ Downloading <code>{file_name}</code>...", parse_mode="HTML")
     
     if state['step'] == 'waiting_for_original':
         file_path = f"tmp_files/orig_{chat_id}_{file_name}"
@@ -416,10 +487,25 @@ def process_state_file(message, file_name, file_path_or_download_func, is_url=Fa
             state['original_path'] = file_path
             state['is_zip'] = is_zip
             state['step'] = 'waiting_for_dump'
-            bot.edit_message_text(f"✅ Received <b>ORIGINAL</b> {'Archive' if is_zip else 'File'}: <code>{file_name}</code>\n\nNow, send me the <b>DUMPED</b> {'Archive' if is_zip else 'File'} (Link or Upload).\n\n💡 Need to dump first? Use <code>/dumplib</code>", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+            bot.edit_message_text(f"✅ Received <b>ORIGINAL</b> {'Archive' if is_zip else 'File'}: <code>{file_name}</code>\n\nNow, send me the <b>DUMPED</b> {'Archive' if is_zip else 'File'} (Link or Upload).\n\n💡 Use <b>/dump</b> for tools.", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
         else: bot.edit_message_text("❌ Download failed.", chat_id=chat_id, message_id=msg.message_id)
             
     elif state['step'] == 'waiting_for_dump':
+        if is_zip != state.get('is_zip', False):
+            return bot.edit_message_text("⚠️ Format mismatch! Send a ZIP if you sent a ZIP originally.", chat_id=chat_id, message_id=msg.message_id)
+            
+        file_path = f"tmp_files/dump_{chat_id}_{file_name}"
+        success = file_path_or_download_func(file_path)
+        if success:
+            state['dump_path'] = file_path
+            state['step'] = 'processing'
+            bot.edit_message_text("🔄 <b>Comparing libs...</b>", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+            time.sleep(1)
+            bot.edit_message_text("⚙️ <b>Processing results...</b>", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
+            if is_zip: process_zip_files(chat_id, msg)
+            else: process_files(chat_id, msg)
+        else: bot.edit_message_text("❌ Download failed.", chat_id=chat_id, message_id=msg.message_id)
+
         if is_zip != state.get('is_zip', False):
             return bot.edit_message_text("⚠️ Format mismatch! Send a ZIP if you sent a ZIP originally.", chat_id=chat_id, message_id=msg.message_id)
             
@@ -443,9 +529,13 @@ def handle_urls(message):
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
-    if message.document.file_size > 20 * 1024 * 1024: return bot.reply_to(message, "<b>⚠️ File too large!</b>\nSend a <b>direct download link</b>.", parse_mode="HTML")
+    if message.document.file_size > 500 * 1024 * 1024: return bot.reply_to(message, "<b>⚠️ File too large!</b>\nSend a <b>direct download link</b>.", parse_mode="HTML")
     file_name = message.document.file_name
-    if not (file_name.endswith('.so') or file_name.endswith('.zip')): return bot.reply_to(message, "⚠️ Please upload a <code>.so</code> or <code>.zip</code> file.", parse_mode="HTML")
+    # Support .so, .bin, and .cpp extensions for dumps
+    valid_exts = ('.so', '.bin', '.cpp', '.zip')
+    if not file_name.lower().endswith(valid_exts): 
+        return bot.reply_to(message, "⚠️ Please upload a <code>.so</code>, <code>.bin</code>, <code>.cpp</code> or <code>.zip</code> file.", parse_mode="HTML")
+    
     def download(path):
         file_info = bot.get_file(message.document.file_id)
         downloaded = bot.download_file(file_info.file_path)
@@ -457,126 +547,53 @@ def get_all_files(directory):
     files = []
     for root, _, filenames in os.walk(directory):
         for filename in filenames:
-            if filename.endswith('.so'):
+            if filename.lower().endswith(('.so', '.bin', '.cpp')):
                 files.append(os.path.join(root, filename))
     return files
 
 def format_offsets_for_telegram(lib_name, offsets):
     if not offsets: return ""
-    header = f"🚀 <b>ALL OFFSETS DETECTED</b>\n📦 Library: <code>Dump_{lib_name}.cpp</code>\n\n"
+    header = f"🚀 <b>OFFSETS DETECTED</b>\n📦 Library: <code>{lib_name}</code>\n\n"
     content = ""
     for offset in offsets:
         content += f"{offset}\n"
     full_msg = header + "<blockquote><pre>" + content + "</pre></blockquote>"
-    full_msg += "\n\n<b>Dumped By @LegacyDumperBot</b>"
+    full_msg += "\n\n<b>Analyzed By @LegacyDevX</b>"
     return full_msg
-
-def send_long_message(chat_id, text):
-    if len(text) <= 4096:
-        try: bot.send_message(chat_id, text, parse_mode="HTML")
-        except: bot.send_message(chat_id, text) # Fallback if HTML is broken
-    else:
-        # Split by newline to avoid breaking HTML tags mid-line
-        parts = []
-        while len(text) > 0:
-            if len(text) <= 4096:
-                parts.append(text)
-                break
-            
-            # Find last newline within limit
-            split_idx = text.rfind('\n', 0, 4096)
-            if split_idx == -1: split_idx = 4096 # Force split if no newline
-            
-            parts.append(text[:split_idx])
-            text = text[split_idx:].lstrip()
-            
-        for part in parts:
-            try: bot.send_message(chat_id, part, parse_mode="HTML")
-            except: bot.send_message(chat_id, part)
-
-def process_zip_files(chat_id, status_message):
-    state = user_states.get(chat_id)
-    if not state: return
-    orig_zip, dump_zip = state['original_path'], state['dump_path']
-    orig_dir = f"tmp_files/orig_dir_{chat_id}"
-    dump_dir = f"tmp_files/dump_dir_{chat_id}"
-    out_dir = f"tmp_files/out_dir_{chat_id}"
-    os.makedirs(orig_dir, exist_ok=True); os.makedirs(dump_dir, exist_ok=True); os.makedirs(out_dir, exist_ok=True)
-    extract_archive(orig_zip, orig_dir); extract_archive(dump_zip, dump_dir)
-    orig_files, dump_files = get_all_files(orig_dir), get_all_files(dump_dir)
-    bot.edit_message_text("🔍 Extracting and matching libraries...", chat_id=chat_id, message_id=status_message.message_id)
-    results = []; all_extracted_text = ""
-    for orig_so in orig_files:
-        filename = os.path.basename(orig_so)
-        matching_dump = next((d for d in dump_files if os.path.basename(d) == filename), None)
-        if matching_dump:
-            lib_name = filename.replace('.so', '')
-            start_addr, end_addr = get_auto_range(orig_so)
-            log_file, patched_file = os.path.join(out_dir, f"Dump_{lib_name}.cpp"), os.path.join(out_dir, f"PRO_{lib_name}.so")
-            hooks, extracted_offsets = scan_single_dump_pro(orig_so, matching_dump, start_addr, end_addr, log_file, lib_name)
-            is_patched = patch_binary_pro(matching_dump, patched_file)
-            results.append((filename, hooks, is_patched))
-            if extracted_offsets: all_extracted_text += format_offsets_for_telegram(lib_name, extracted_offsets) + "\n\n"
-    if not results: bot.edit_message_text("⚠️ No matching .so files found.", chat_id=chat_id, message_id=status_message.message_id)
-    else:
-        summary = "✅ Done:\n" + "\n".join([f"📦 {f}: {h} hooks | Patched: {'Yes' if p else 'No'}" for f, h, p in results])
-        summary += "\n\n<b>Dumped By @LegacyDumperBot</b>"
-        bot.edit_message_text(f"⚙️ Zipping results...\n{summary}", chat_id=chat_id, message_id=status_message.message_id, parse_mode="HTML")
-        if all_extracted_text: send_long_message(chat_id, all_extracted_text)
-        out_zip = f"tmp_files/Results_{chat_id}.zip"
-        with zipfile.ZipFile(out_zip, 'w') as zf:
-            for root, _, files in os.walk(out_dir):
-                for file in files: zf.write(os.path.join(root, file), file)
-        if os.path.getsize(out_zip) > 49 * 1024 * 1024:
-            link = upload_to_gofile(out_zip)
-            if link: bot.send_message(chat_id, f"🛡️ <b>Results ZIP</b>\n👉 {link}\n\n<b>Dumped By @LegacyDumperBot</b>", parse_mode="HTML")
-        else:
-            with open(out_zip, 'rb') as f: bot.send_document(chat_id, f, caption=summary, parse_mode="HTML")
-        try:
-            bot.delete_message(chat_id, status_message.message_id)
-        except:
-            pass
-    shutil.rmtree(orig_dir, ignore_errors=True); shutil.rmtree(dump_dir, ignore_errors=True); shutil.rmtree(out_dir, ignore_errors=True)
-    for p in [orig_zip, dump_zip, out_zip] if 'out_zip' in locals() else [orig_zip, dump_zip]:
-        if os.path.exists(p): os.remove(p)
-    user_states[chat_id] = {'step': 'waiting_for_original'}
 
 def process_files(chat_id, status_message):
     state = user_states.get(chat_id)
     if not state: return
     orig_path, dump_path = state['original_path'], state['dump_path']
-    lib_name = os.path.basename(orig_path).replace('.so', '').replace('orig_', '').split('_', 1)[-1]
+    # Clean up filename for display
+    lib_name = os.path.basename(dump_path).replace('dump_', '').split('_', 1)[-1]
+    
+    log_file = f"tmp_files/Dump_{lib_name}.cpp"
     start_addr, end_addr = get_auto_range(orig_path)
-    log_file, patched_file = f"tmp_files/Dump_{lib_name}_{chat_id}.cpp", f"tmp_files/PRO_{lib_name}_{chat_id}.so"
-    bot.edit_message_text(f"🔍 Scanning {lib_name}...", chat_id=chat_id, message_id=status_message.message_id)
+    
     hooks_found, extracted_offsets = scan_single_dump_pro(orig_path, dump_path, start_addr, end_addr, log_file, lib_name)
-    is_patched = patch_binary_pro(dump_path, patched_file)
     offset_msg = format_offsets_for_telegram(lib_name, extracted_offsets)
+
     if os.path.exists(log_file):
-        caption = offset_msg if len(offset_msg) < 1024 else f"📝 {lib_name} Log ({hooks_found} hooks)\n\n<b>Dumped By @LegacyDumperBot</b>"
+        # Update status to done
+        bot.edit_message_text("✅ <b>Analysis Complete!</b> Sending results...", chat_id=chat_id, message_id=status_message.message_id, parse_mode="HTML")
+        
+        caption = f"📝 <b>Analysis Log: {lib_name}</b>\n\n<b>Hooks Found:</b> <code>{hooks_found}</code>\n\n<b>Dumped By @LegacyDevX</b>"
         with open(log_file, 'rb') as f:
             bot.send_document(chat_id, f, caption=caption, parse_mode="HTML")
-        if len(offset_msg) >= 1024:
+        
+        if extracted_offsets:
             send_long_message(chat_id, offset_msg)
-    elif extracted_offsets:
-        send_long_message(chat_id, offset_msg)
-
-    if is_patched and os.path.exists(patched_file):
-        if os.path.getsize(patched_file) > 49 * 1024 * 1024:
-            link = upload_to_gofile(patched_file)
-            if link: bot.send_message(chat_id, f"🛡️ <b>Patched</b>\n👉 {link}\n\n<b>Dumped By @LegacyDumperBot</b>", parse_mode="HTML")
-        else:
-            with open(patched_file, 'rb') as f: bot.send_document(chat_id, f, caption="🛡️ Patched (Root Bypassed)\n\n<b>Dumped By @LegacyDumperBot</b>", parse_mode="HTML")
     else:
-        bot.send_message(chat_id, "⚠️ No root check patterns found.\n\n<b>Dumped By @LegacyDumperBot</b>", parse_mode="HTML")
+        bot.edit_message_text("❌ <b>Analysis Failed:</b> No differences found between original and dump.", chat_id=chat_id, message_id=status_message.message_id, parse_mode="HTML")
     
-    try:
-        bot.delete_message(chat_id, status_message.message_id)
-    except:
-        pass
-    for p in [orig_path, dump_path, log_file, patched_file]:
-        if os.path.exists(p): os.remove(p)
+    # Cleanup
+    for p in [dump_path, log_file]:
+        if os.path.exists(p) and "base_libs" not in p: os.remove(p)
+    if "tmp_files/orig_" in orig_path and os.path.exists(orig_path): os.remove(orig_path)
+    
     user_states[chat_id] = {'step': 'waiting_for_original'}
+
 
 if __name__ == '__main__':
     print("🤖 Legacy Dumper Bot is starting up...")

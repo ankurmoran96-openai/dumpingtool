@@ -1,6 +1,7 @@
 import random
 import re
 import hashlib
+import os
 
 def obfuscate_lua_harder(lua_code):
     lua_code = re.sub(r'--.*', '', lua_code)
@@ -49,82 +50,13 @@ local {v_load} = loadstring or load
     return obfuscated
 
 if __name__ == "__main__":
-    file_path = "/data/data/com.termux/files/home/dumpingtool/LegacyCoreDumper.lua"
-    original_code = """
-GAME_LIBS = {}
-function ReadInt32(addr)
-    local from = {{address = addr, flags = 4}}
-    from = gg.getValues(from)
-    return from[1].value
-end
-function Num2HexStr(num, uppercase)
-    if not uppercase or uppercase == 0 then return string.format("%x", num) end
-    return string.format("%X", num)
-end
-function alreadyHave(compare_t, str)
-    for index, element in ipairs(compare_t) do if element == str then return true end end
-    return false
-end
-function getFullMemoryRange(lib_name)
-    local ranges = gg.getRangesList("/data/*" .. lib_name)
-    local full_range = {start = nil, lastSec = nil}
-    for _, range in ipairs(ranges) do
-        if not full_range.start or range.start < full_range.start then full_range.start = range.start end
-        if not full_range.lastSec or range['end'] > full_range.lastSec then full_range.lastSec = range['end'] end
-    end
-    return full_range
-end
-function getSortedGameLibs()
-    local return_t = {}
-    local lib_maps = gg.getRangesList(("/data/*" .. gg.getTargetInfo().packageName .. "*lib*.so"))
-    for index, element in ipairs(lib_maps) do
-        if element.state == 'Xa' or element.state == 'Cd' or element.state == 'Ca' or element.state == 'Xs' then
-            local org_name = element.internalName:match("/.*/(lib.*%.so)")
-            if not alreadyHave(return_t, org_name) then
-                element.org_name = org_name
-                table.insert(GAME_LIBS, element)
-                table.insert(return_t, org_name)
-            end
-        end
-    end
-    return return_t
-end
-function dumpELF(data)
-    if ReadInt32(data.start) ~= 1179403647 then
-        gg.alert("Validation failed: Not a valid ELF image.\\n\\nOperation aborted.")
-        os.exit()
-    end
-    local dump_file_path = "/sdcard/dump/"
-    local full_range = getFullMemoryRange(data.org_name)
-    gg.toast("Preparing memory dump...")
-    print("== Legacy Dumper — Dump Utility ==")
-    print("Target library: " .. data.org_name)
-    print("Memory range: " .. Num2HexStr(full_range.start) .. " — " .. Num2HexStr(full_range.lastSec))
-    gg.dumpMemory(full_range.start, full_range.lastSec, dump_file_path)
-    local old_name = gg.getTargetInfo().packageName .. "-" .. Num2HexStr(full_range.start) .. "-" .. Num2HexStr(full_range.lastSec) .. ".bin"
-    local new_name = "[" .. Num2HexStr(full_range.start, 1) .. "-" .. Num2HexStr(full_range.lastSec, 1) .. "]_" .. data.org_name
-    local save_path = dump_file_path .. new_name
-    os.rename(dump_file_path .. old_name, save_path)
-    gg.alert("Dump saved successfully.\\n\\nLocation:\\n" .. save_path)
-    print("Dump completed successfully!")
-    os.exit()
-end
-function entrypoint()
-    gg.alert("Legacy Dumper — Professional Dump Tool\\nOwner: @LegacyDevX\\nDeveloper: @legacyxanku")
-    local libs_t = getSortedGameLibs()
-    if #libs_t == 0 then
-        gg.alert("No suitable libraries found for this target.\\nEnsure the target application is running and try again.")
-        os.exit()
-    end
-    local prompt = "Select a library to dump:\\n\\n(Use the list below to choose the target shared object)"
-    local point = gg.choice(libs_t, nil, prompt)
-    if not point then os.exit() end
-    gg.toast("Starting dump for: " .. libs_t[point])
-    dumpELF(GAME_LIBS[point])
-end
-entrypoint()
-"""
-    obfuscated_code = obfuscate_lua_harder(original_code)
-    with open(file_path, "w") as f:
-        f.write(obfuscated_code)
-    print("Lua script obfuscated with Synthetic Neural Sentinel and Self-Checking Integrity.")
+    file_path = "/data/data/com.termux/files/home/dumpingtool/tools/LegacyCoreDumper.lua"
+    if not os.path.exists(file_path):
+        print(f"Error: {file_path} not found.")
+    else:
+        with open(file_path, "r") as f:
+            original_code = f.read()
+        obfuscated_code = obfuscate_lua_harder(original_code)
+        with open(file_path, "w") as f:
+            f.write(obfuscated_code)
+        print("Lua script obfuscated with Synthetic Neural Sentinel and Self-Checking Integrity.")
