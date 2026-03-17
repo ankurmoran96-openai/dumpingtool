@@ -4,6 +4,7 @@ import re
 import time
 import secrets
 import string
+import mmap
 from datetime import datetime
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
@@ -46,17 +47,18 @@ def is_important_pattern(data, offset):
     return None, None
 
 def scan_dump(original_path, dump_path, output_log, lib_name):
-    """PRO VERSION LOGIC: Only logs important patterns as per run.py"""
+    """PRO VERSION LOGIC: Uses mmap for high performance scanning"""
     try:
-        with open(original_path, "rb") as f1:
-            original_data = f1.read()
-        with open(dump_path, "rb") as f2:
-            dump_data = f2.read()
+        f1 = open(original_path, "rb")
+        f2 = open(dump_path, "rb")
+        
+        m1 = mmap.mmap(f1.fileno(), 0, access=mmap.ACCESS_READ)
+        m2 = mmap.mmap(f2.fileno(), 0, access=mmap.ACCESS_READ)
     except Exception as e:
         return f"Error reading files: {e}", 0
 
     # Align with run.py: Use 99.5% of file size for safe scanning
-    file_size = int(min(len(original_data), len(dump_data)) * 0.995)
+    file_size = int(min(len(m1), len(m2)) * 0.995)
     
     hooks_found = 0
     results = []
@@ -69,22 +71,19 @@ def scan_dump(original_path, dump_path, output_log, lib_name):
 
     i = 0
     while i < file_size:
-        # Step logic: Only process if data is different
-        if original_data[i] != dump_data[i]:
-            pattern_name, pattern_bytes = is_important_pattern(dump_data, i)
+        if m1[i] != m2[i]:
+            pattern_name, pattern_bytes = is_important_pattern(m2, i)
             
             if pattern_name:
-                # Log exactly as run.py does
                 if pattern_name == "HOOK_SIGNATURE":
                     results.append(f"0x{i:06X} HOOK OFFSET")
-                    i += 16 # Skip the hook block
+                    i += 16
                 else:
-                    hex_str = ' '.join(f"{dump_data[i + j]:02X}" for j in range(len(pattern_bytes)))
+                    hex_str = ' '.join(f"{m2[i + j]:02X}" for j in range(len(pattern_bytes)))
                     results.append(f"0x{i:06X} {hex_str} // {pattern_name}")
                     i += len(pattern_bytes)
                 hooks_found += 1
             else:
-                # If it's a difference but NOT an important pattern, we skip it (Pro Mode)
                 i += 1
         else:
             i += 1
@@ -92,6 +91,11 @@ def scan_dump(original_path, dump_path, output_log, lib_name):
     results.append(f"\n// TOTAL IMPORTANT HOOKS: {hooks_found}")
     results.append(f"// SCAN COMPLETED BY LEGACY CORE PRO")
     
+    m1.close()
+    m2.close()
+    f1.close()
+    f2.close()
+
     with open(output_log, "w", encoding='utf-8') as f:
         f.write("\n".join(results))
     
@@ -268,10 +272,11 @@ async def dump_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Join our channel first! /start")
         return
 
-    zip_path = os.path.join(os.getcwd(), "dumpingtool/tools/LegacyCore_Tools.zip")
+    # Use the correct path relative to the script
+    zip_path = os.path.join(os.path.dirname(__file__), "tools/LegacyCore_Tools.zip")
     
     if not os.path.exists(zip_path):
-        await update.message.reply_text("❌ <b>Tools Pack not found on server!</b>", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("❌ <b>Tools Pack not found on server!</b>\nContact admin to upload LegacyCore_Tools.zip", parse_mode=ParseMode.HTML)
         return
 
     caption = (
@@ -423,8 +428,6 @@ def main():
     app.add_handler(CallbackQueryHandler(help_callback, pattern="^help_guide$"))
     app.add_handler(CallbackQueryHandler(back_callback, pattern="^back_start$"))
     app.add_handler(CallbackQueryHandler(verify_callback, pattern="^verify_join$"))
-    app.add_handler(CallbackQueryHandler(done_dumping_callback, pattern="^done_dumping$"))
-    app.add_handler(CallbackQueryHandler(cancel_dumping_callback, pattern="^cancel_dumping$"))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     
     logger.info("Legacy Core Bot started...")

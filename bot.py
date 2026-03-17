@@ -15,8 +15,8 @@ import mmap
 import time
 
 # --- CONFIGURATION ---
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8611766126:AAE3QdKQHauKc99qs2D8wmE0GwZpGNyU7hk')
-COMMUNITY_ID = os.environ.get('COMMUNITY_ID', '-1003729793140')
+BOT_TOKEN = '8611766126:AAE3QdKQHauKc99qs2D8wmE0GwZpGNyU7hk'
+COMMUNITY_ID = '-1003729793140'
 COMMUNITY_LINK = "https://t.me/+UZEwuXC7b_plZDJl"
 ADMIN_IDS = [5707956654, 6049120581]
 PROXY_URL = os.environ.get('PROXY_URL')
@@ -502,19 +502,6 @@ def process_state_file(message, file_name, file_path_or_download_func, is_url=Fa
             bot.edit_message_text("🔄 <b>Comparing libs...</b>", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
             time.sleep(1)
             bot.edit_message_text("⚙️ <b>Processing results...</b>", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
-            if is_zip: process_zip_files(chat_id, msg)
-            else: process_files(chat_id, msg)
-        else: bot.edit_message_text("❌ Download failed.", chat_id=chat_id, message_id=msg.message_id)
-
-        if is_zip != state.get('is_zip', False):
-            return bot.edit_message_text("⚠️ Format mismatch! Send a ZIP if you sent a ZIP originally.", chat_id=chat_id, message_id=msg.message_id)
-            
-        file_path = f"tmp_files/dump_{chat_id}_{file_name}"
-        success = file_path_or_download_func(file_path)
-        if success:
-            state['dump_path'] = file_path
-            state['step'] = 'processing'
-            bot.edit_message_text("✅ Dump received! ⚙️ Processing...", chat_id=chat_id, message_id=msg.message_id, parse_mode="HTML")
             if is_zip: process_zip_files(chat_id, msg)
             else: process_files(chat_id, msg)
         else: bot.edit_message_text("❌ Download failed.", chat_id=chat_id, message_id=msg.message_id)
