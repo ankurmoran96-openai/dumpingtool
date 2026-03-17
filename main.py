@@ -299,12 +299,14 @@ async def gen_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
+        # /gen [days]d [count]
         args = context.args
         if not args:
-            await update.message.reply_text("Usage: /gen [days] [optional: count]")
+            await update.message.reply_text("Usage: /gen [days]d [optional: count]\nExample: /gen 30d 5")
             return
             
-        days = int(args[0])
+        days_str = args[0].lower().replace('d', '')
+        days = int(days_str)
         count = int(args[1]) if len(args) > 1 else 1
         
         generated_keys = []
@@ -317,7 +319,7 @@ async def gen_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(resp, parse_mode=ParseMode.HTML)
         
     except ValueError:
-        await update.message.reply_text("Invalid arguments. Use: /gen [days] [count]")
+        await update.message.reply_text("Invalid arguments. Use: /gen [days]d [count]\nExample: /gen 30d 5")
 
 async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
