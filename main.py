@@ -20,6 +20,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# --- State Management ---
+USER_STATES = {} # {user_id: {'step': 'waiting_for_og', 'og_path': '...', 'original_name': '...'}}
+
 # --- Helper Functions ---
 
 async def is_member(user_id, context):
@@ -30,14 +33,6 @@ async def is_member(user_id, context):
     except Exception:
         pass
     return False
-
-def detect_library(filename):
-    name = filename.lower()
-    for lib_name, lib_file in LIBS_CONFIG.items():
-        # Match if lib_name is in filename (e.g. "anogs" in "dump_anogs.so")
-        if lib_name.lower() in name:
-            return lib_name
-    return "Unknown"
 
 def is_important_pattern(data, offset):
     for pattern_name, pattern_bytes in IMPORTANT_PATTERNS.items():
@@ -176,12 +171,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE, edit=False):
         f"<b>📊 ACCOUNT STATUS</b>\n"
         f"└ Subscription: {status_text}\n\n"
         f"<b>🚀 CORE CAPABILITIES</b>\n"
-        f"• <b>Smart Scanning:</b> Real-time differential analysis between Original and Dumped binaries.\n"
+        f"• <b>Dual-File Scan:</b> Compare Original vs Dumped binaries manually.\n"
         f"• <b>Hook Detection:</b> Automated identification of memory hooks and code modifications.\n"
-        f"• <b>Pro Patching:</b> One-tap Root-check bypass and security mitigation.\n"
-        f"• <b>Multi-Lib Support:</b> Native support for Anogs, UE4, AntsVoice, and more.\n\n"
+        f"• <b>Pro Patching:</b> One-tap Root-check bypass and security mitigation.\n\n"
         f"<b>📥 GETTING STARTED</b>\n"
-        f"Simply upload your <b>Dumped .so</b> file to begin the analysis. Our engine will handle the rest.\n\n"
+        f"Use <code>/dump</code> to get the tools. Then, upload your <b>Original (OG) .so</b> file followed by the <b>Dumped .so</b> file.\n\n"
         f"<i>Select an option from the menu below to explore further:</i>"
     )
 
@@ -230,13 +224,13 @@ async def help_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>1. Activation:</b>\n"
         "Purchase a key and use <code>/redeem [KEY]</code> to unlock Pro features.\n\n"
         "<b>2. Binary Analysis:</b>\n"
-        "Send any <b>Dumped .so</b> file to the bot. Our engine will automatically detect the library and provide a detailed <code>.cpp</code> hook log.\n\n"
+        "First, upload the <b>Original (OG) .so</b> file. Then, upload the <b>Dumped .so</b> file. The bot will compare them and extract offsets.\n\n"
         "<b>3. How to Dump:</b>\n"
-        "To get a memory dump from a modded APK, use our specialized Lua script. Type <code>/dump</code> to download the <b>Legacy Core Tools</b> pack.\n\n"
+        "Use <code>/dump</code> to download the tools. Follow the instructions for Root or Non-Root devices.\n\n"
         "<b>4. Requirements:</b>\n"
         "• Rooted Device OR Virtual Space (for non-root).\n"
-        "• Game Guardian (to execute the script).\n"
-        "• LegacyCoreDumper.lua (included in tools)."
+        "• <a href='https://gameguardian.net/download'>GAME GUARDIAN</a> (Required).\n"
+        "• LegacyCoreDumper.lua (Included in tools)."
     )
     
     back_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 BACK", callback_data="back_start")]])
@@ -257,7 +251,6 @@ async def verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if await is_member(user_id, context):
         await query.answer("✅ Membership Verified!", show_alert=True)
-        # Try to delete the join message and send start
         try:
             await query.message.delete()
         except:
@@ -272,7 +265,6 @@ async def dump_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Join our channel first! /start")
         return
 
-    # Use the correct path relative to the script
     zip_path = os.path.join(os.path.dirname(__file__), "tools/LegacyCore_Tools.zip")
     
     if not os.path.exists(zip_path):
@@ -282,15 +274,20 @@ async def dump_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = (
         "📦 <b>LEGACY CORE ❯ TOOLS PACK</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "This package contains everything you need to dump memory from modded APKs.\n\n"
-        "📜 <b>LegacyCoreDumper.lua:</b> High-performance obfuscated dumper script.\n\n"
-        "🛠 <b>Instructions:</b>\n"
-        "1. Open the game and <b>Game Guardian</b>.\n"
-        "2. Execute <code>LegacyCoreDumper.lua</code> inside the game process.\n"
-        "3. Follow the script prompts to save the dump.\n"
-        "4. Upload the resulting <code>.so</code> file here for analysis.\n\n"
-        "⚠️ <b>Note:</b> Non-root users <b>MUST</b> use a Virtual Space for Game Guardian to function correctly.\n\n"
-        "<i>Developed by @legacyxanku | Protected by Legacy Core</i>"
+        "This package contains the essential tools for dumping memory.\n\n"
+        "📜 <b>LegacyCoreDumper.lua:</b> Optimized dumper script.\n"
+        "🛠 <b>Virtual Space:</b> Included for Non-Root users.\n"
+        "🌐 <b>GG Tool:</b> <a href='https://gameguardian.net/download'>Official GAME GUARDIAN</a>\n\n"
+        "🚀 <b>ROOT USER INSTRUCTIONS:</b>\n"
+        "1. Open Game and <a href='https://gameguardian.net/download'>GAME GUARDIAN</a>.\n"
+        "2. Select Game Process in GG.\n"
+        "3. Execute <code>LegacyCoreDumper.lua</code> and follow prompts.\n"
+        "4. Save the resulting <code>.so</code> dump file.\n\n"
+        "🛡️ <b>NON-ROOT USER INSTRUCTIONS:</b>\n"
+        "1. Install the provided <b>Virtual Space</b> apk.\n"
+        "2. Add both the <b>Game</b> and <a href='https://gameguardian.net/download'>GAME GUARDIAN</a> inside the Virtual Space.\n"
+        "3. Open them from inside the Virtual and follow the Root steps above.\n\n"
+        "<i>After dumping, upload the Original .so first, then the Dumped .so.</i>"
     )
 
     with open(zip_path, 'rb') as f:
@@ -302,7 +299,6 @@ async def gen_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        # /gen [duration_days] [count]
         args = context.args
         if not args:
             await update.message.reply_text("Usage: /gen [days] [optional: count]")
@@ -343,15 +339,13 @@ async def redeem(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
-    # Membership check
     if not await is_member(user_id, context):
         await update.message.reply_text("❌ <b>Access Denied!</b>\nYou must join our official channel to use this bot.\n/start to join.", parse_mode=ParseMode.HTML)
         return
 
     subscribed, _ = is_subscribed(user_id)
-    
     if not subscribed:
-        await update.message.reply_text("❌ <b>Access Denied!</b>\nYou need an active subscription to use the Dumper. Contact an admin to get a key.", parse_mode=ParseMode.HTML)
+        await update.message.reply_text("❌ <b>Access Denied!</b>\nYou need an active subscription to use the Dumper.", parse_mode=ParseMode.HTML)
         return
 
     doc = update.message.document
@@ -359,60 +353,81 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Please send a valid <b>.so</b> file.")
         return
 
-    # Detection
-    lib_name = detect_library(doc.file_name)
-    if lib_name == "Unknown":
-        await update.message.reply_text("⚠️ <b>Unknown Library!</b>\nI couldn't identify this .so file. Supported libraries: Anogs, UE4, AntsVoice, RoosterNN, hdmvp, TblueData.", parse_mode=ParseMode.HTML)
-        return
+    state = USER_STATES.get(user_id, {'step': 'waiting_for_og'})
 
-    original_file_name = LIBS_CONFIG.get(lib_name)
-    original_path = os.path.join(BASE_LIBS_DIR, original_file_name)
-
-    if not os.path.exists(original_path):
-        await update.message.reply_text(f"❌ <b>Original File Missing!</b>\nBase library <code>{original_file_name}</code> not found in database.", parse_mode=ParseMode.HTML)
-        return
-
-    status_msg = await update.message.reply_text(f"⏳ <b>Processing {lib_name}...</b>\nComparing against base database.", parse_mode=ParseMode.HTML)
-
-    # Download user file
-    file = await context.bot.get_file(doc.file_id)
-    dump_path = os.path.join(DATA_DIR, f"{user_id}_{doc.file_name}")
-    await file.download_to_drive(dump_path)
-
-    # Process
-    log_file = os.path.join(LOGS_DIR, f"Result_{lib_name}_{user_id}.cpp")
-    error, hooks = scan_dump(original_path, dump_path, log_file, lib_name)
-
-    if error:
-        await status_msg.edit_text(f"❌ <b>Processing Error:</b>\n{error}", parse_mode=ParseMode.HTML)
-    else:
-        # Patching
-        patched_file = os.path.join(DATA_DIR, f"LEGACY_PRO_{doc.file_name}")
-        patch_success = patch_binary(dump_path, patched_file)
-
-        await status_msg.delete()
+    if state['step'] == 'waiting_for_og':
+        # Received OG file
+        file = await context.bot.get_file(doc.file_id)
+        og_path = os.path.join(DATA_DIR, f"{user_id}_OG_{doc.file_name}")
+        await file.download_to_drive(og_path)
         
-        caption = (
-            f"🎯 <b>Scan Completed for {lib_name}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"📍 <b>Important Hooks:</b> {hooks}\n"
-            f"🔧 <b>Root Patch:</b> {'Applied' if patch_success else 'No patterns found'}\n\n"
-            f"<i>Powered by Legacy Core Pro Engine</i>"
+        USER_STATES[user_id] = {
+            'step': 'waiting_for_dump',
+            'og_path': og_path,
+            'original_name': doc.file_name
+        }
+        
+        await update.message.reply_text(
+            f"✅ <b>Original File Received:</b> <code>{doc.file_name}</code>\n\n"
+            "📥 Now please send the <b>Dumped .so</b> file for comparison.",
+            parse_mode=ParseMode.HTML
         )
-        
-        with open(log_file, 'rb') as f:
-            await update.message.reply_document(document=f, caption=caption, parse_mode=ParseMode.HTML)
-            
-        if patch_success:
-            with open(patched_file, 'rb') as f:
-                await update.message.reply_document(document=f, caption="🛠 <b>Patched Binary (Bypassed)</b>", parse_mode=ParseMode.HTML)
+        return
 
-    # Cleanup
-    try:
-        if os.path.exists(dump_path): os.remove(dump_path)
-        if os.path.exists(patched_file): os.remove(patched_file)
-    except:
-        pass
+    elif state['step'] == 'waiting_for_dump':
+        # Received Dump file
+        og_path = state['og_path']
+        lib_name = state['original_name']
+        
+        status_msg = await update.message.reply_text(f"⏳ <b>Processing {lib_name}...</b>\nComparing Original vs Dump.", parse_mode=ParseMode.HTML)
+
+        file = await context.bot.get_file(doc.file_id)
+        dump_path = os.path.join(DATA_DIR, f"{user_id}_DUMP_{doc.file_name}")
+        await file.download_to_drive(dump_path)
+
+        # Process
+        log_file = os.path.join(LOGS_DIR, f"Result_{lib_name}_{user_id}.cpp")
+        error, hooks = scan_dump(og_path, dump_path, log_file, lib_name)
+
+        if error:
+            await status_msg.edit_text(f"❌ <b>Processing Error:</b>\n{error}", parse_mode=ParseMode.HTML)
+        else:
+            # Patching
+            patched_file = os.path.join(DATA_DIR, f"LEGACY_PRO_{doc.file_name}")
+            patch_success = patch_binary(dump_path, patched_file)
+
+            await status_msg.delete()
+            
+            caption = (
+                f"🎯 <b>Scan Completed for {lib_name}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"📍 <b>Important Hooks:</b> {hooks}\n"
+                f"🔧 <b>Root Patch:</b> {'Applied' if patch_success else 'No patterns found'}\n\n"
+                f"<i>Powered by Legacy Core Pro Engine</i>"
+            )
+            
+            with open(log_file, 'rb') as f:
+                await update.message.reply_document(document=f, caption=caption, parse_mode=ParseMode.HTML)
+                
+            if patch_success:
+                with open(patched_file, 'rb') as f:
+                    await update.message.reply_document(document=f, caption="🛠 <b>Patched Binary (Bypassed)</b>", parse_mode=ParseMode.HTML)
+
+        # Cleanup
+        try:
+            if os.path.exists(og_path): os.remove(og_path)
+            if os.path.exists(dump_path): os.remove(dump_path)
+            if os.path.exists(patched_file): os.remove(patched_file)
+        except:
+            pass
+        
+        # Reset state
+        USER_STATES[user_id] = {'step': 'waiting_for_og'}
+        return
+    else:
+        # Fallback
+        USER_STATES[user_id] = {'step': 'waiting_for_og'}
+        await update.message.reply_text("❌ <b>Error:</b> Please send the <b>Original (OG) .so</b> file first.", parse_mode=ParseMode.HTML)
 
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
